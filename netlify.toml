@@ -1,7 +1,13 @@
 # Netlify configuration for Ultramain Batch Planner
-# Static site in the repo root; TikTok integration runs as serverless functions.
+# The site is plain static files in the repo root; the TikTok integration
+# runs as serverless functions under netlify/functions.
 
 [build]
   publish = "."
   functions = "netlify/functions"
 
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"

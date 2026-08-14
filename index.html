@@ -1,0 +1,1689 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="description" content="Weekly TikTok batch planner + TOC script generator for @ultramain">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Batch Planner">
+<title>TikTok Batch Planner — @ultramain</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%23000' width='192' height='192'/><text x='96' y='120' font-size='80' fill='white' text-anchor='middle' font-weight='bold'>BP</text></svg>">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  /* Fallback / critical CSS — keeps the app usable even if the Tailwind CDN never loads. */
+  :root { color-scheme: light; }
+  html, body { margin:0; padding:0; background:#faf9f7; color:#1c1917;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  #app { max-width: 480px; margin: 0 auto; padding-bottom: 96px; }
+  #bottomnav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; }
+  button, select, input, textarea { font: inherit; }
+  button { cursor: pointer; }
+  .hidden { display: none !important; }
+  .tap { min-height: 48px; }
+  textarea { resize: vertical; }
+  .cap { white-space: pre-wrap; word-break: break-word; }
+  .no-scrollbar::-webkit-scrollbar { display:none; }
+  .no-scrollbar { -ms-overflow-style:none; scrollbar-width:none; }
+  @supports(padding: max(0px)) { #bottomnav { padding-bottom: max(6px, env(safe-area-inset-bottom)); } }
+</style>
+</head>
+<body class="bg-stone-50 text-stone-900">
+
+<header class="sticky top-0 z-30 bg-stone-50/95 backdrop-blur border-b border-stone-200">
+  <div class="max-w-[480px] mx-auto px-4 pt-3 pb-2">
+    <div class="flex items-start justify-between gap-2">
+      <div>
+        <h1 class="text-[17px] font-bold leading-tight">TikTok Batch Planner</h1>
+        <p class="text-[12px] text-stone-500 leading-tight">@ultramain · kitchen &amp; household</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="installBtn" class="hidden text-[12px] font-semibold px-3 py-2 rounded-lg bg-stone-900 text-white">Install</button>
+        <button data-action="open-help" class="w-9 h-9 rounded-lg border border-stone-300 text-stone-600 text-[15px]" title="How to use">?</button>
+      </div>
+    </div>
+    <p class="mt-2 text-[11px] leading-snug text-amber-800 bg-amber-100/70 border border-amber-200 rounded-lg px-2 py-1.5">
+      Plan &amp; track on your phone — do the actual <b>scheduling on desktop</b> tiktok.com → TikTok Studio.
+    </p>
+  </div>
+</header>
+
+<main id="app" class="px-4 pt-4">
+  <section id="view-plan"></section>
+  <section id="view-perf" class="hidden"></section>
+  <section id="view-products" class="hidden"></section>
+
+  <!-- Kept in the page body, not behind the help button: TikTok's developer review
+       requires both links to be visible without opening a menu. -->
+  <footer class="mt-6 pt-4 border-t border-stone-200 text-center text-[11px] leading-relaxed text-stone-400">
+    <a href="privacy.html" class="underline text-stone-500">Privacy Policy</a>
+    <span class="mx-1">·</span>
+    <a href="terms.html" class="underline text-stone-500">Terms of Service</a>
+    <div class="mt-1">Personal planning tool for @ultramain. Not affiliated with TikTok.<br>Your data stays on this device.</div>
+  </footer>
+</main>
+
+<nav id="bottomnav" class="bg-white border-t border-stone-200">
+  <div class="max-w-[480px] mx-auto grid grid-cols-3">
+    <button data-tab="plan" class="navbtn tap flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold text-stone-900">
+      <span class="text-[19px] leading-none">🗓️</span><span>Plan Week</span>
+    </button>
+    <button data-tab="perf" class="navbtn tap flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold text-stone-400">
+      <span class="text-[19px] leading-none">📊</span><span>Performance</span>
+    </button>
+    <button data-tab="products" class="navbtn tap flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold text-stone-400">
+      <span class="text-[19px] leading-none">📦</span><span>Products</span>
+    </button>
+  </div>
+</nav>
+
+<div id="toastWrap" class="fixed left-0 right-0 bottom-[86px] z-50 flex flex-col items-center gap-2 pointer-events-none px-4"></div>
+<div id="modalRoot" class="hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+  <div id="modalCard" class="bg-white w-full max-w-[480px] max-h-[88vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-4"></div>
+</div>
+<input type="file" id="videoPicker" accept="video/*" class="hidden">
+<input type="file" id="csvPicker" accept=".csv,text/csv" class="hidden">
+
+<script>
+/* =========================================================================
+   TikTok Batch Planner — @ultramain  ·  v2 (adds TOC script generator)
+   Vanilla JS, no framework, no backend.
+   localStorage: products / logs / plans / settings.  IndexedDB: video files.
+   ========================================================================= */
+
+/* ---------------------------- helpers ---------------------------- */
+const $  = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+const cap1 = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+const DAY_MS = 86400000;
+
+function toast(msg, kind) {
+  const el = document.createElement('div');
+  el.className = 'pointer-events-auto text-[13px] font-medium px-4 py-2.5 rounded-xl shadow-lg max-w-full text-center ' +
+    (kind === 'warn' ? 'bg-amber-500 text-white' : kind === 'err' ? 'bg-red-600 text-white' : 'bg-stone-900 text-white');
+  el.textContent = msg;
+  $('#toastWrap').appendChild(el);
+  setTimeout(() => { el.style.transition = 'opacity .3s'; el.style.opacity = '0'; }, 2400);
+  setTimeout(() => el.remove(), 2800);
+}
+function openModal(html) {
+  $('#modalCard').innerHTML = html;
+  $('#modalRoot').classList.remove('hidden');
+  $('#modalCard').scrollTop = 0;
+}
+function closeModal() {
+  $('#modalRoot').classList.add('hidden');
+  $('#modalCard').innerHTML = '';
+  if (window.__modalCleanup) { try { window.__modalCleanup(); } catch (e) {} window.__modalCleanup = null; }
+}
+async function copyText(txt) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(txt); }
+    else {
+      const ta = document.createElement('textarea');
+      ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+    }
+    toast('Copied ✓'); return true;
+  } catch (e) { toast('Copy failed — long-press to select', 'err'); return false; }
+}
+function fmt(n) {
+  if (n == null || n === '' || isNaN(n)) return '—';
+  n = Number(n);
+  if (n >= 1000000) return (n / 1000000).toFixed(n % 1000000 === 0 ? 0 : 1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'K';
+  return String(n);
+}
+function ymd(d) {
+  d = (d instanceof Date) ? d : new Date(d);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function shortDate(s) {
+  if (!s) return '—';
+  const d = new Date(s + (String(s).length === 10 ? 'T00:00:00' : ''));
+  if (isNaN(d)) return String(s);
+  return d.getDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+}
+function daysSince(s) {
+  if (!s) return null;
+  const d = new Date(s + (String(s).length === 10 ? 'T00:00:00' : ''));
+  if (isNaN(d)) return null;
+  return Math.max(0, Math.floor((Date.now() - d.getTime()) / DAY_MS));
+}
+function mondayOf(d) {
+  const x = new Date(d); x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return x;
+}
+
+/* ---------------------------- IndexedDB (video files) ---------------------------- */
+const DB_NAME = 'ttbp-db', DB_STORE = 'videos';
+let _db = null, idbOK = true;
+const memVideos = {};
+
+function openDB() {
+  return new Promise((resolve) => {
+    if (_db) return resolve(_db);
+    let req;
+    try { req = indexedDB.open(DB_NAME, 1); }
+    catch (e) { idbOK = false; return resolve(null); }
+    req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE, { keyPath: 'id' }); };
+    req.onsuccess = () => { _db = req.result; resolve(_db); };
+    req.onerror = () => { idbOK = false; resolve(null); };
+    req.onblocked = () => { idbOK = false; resolve(null); };
+  });
+}
+async function idbPut(rec) {
+  const db = await openDB();
+  if (!db) { memVideos[rec.id] = rec; return false; }
+  return new Promise((res) => {
+    try {
+      const tx = db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).put(rec);
+      tx.oncomplete = () => res(true);
+      tx.onerror = () => { memVideos[rec.id] = rec; res(false); };
+    } catch (e) { memVideos[rec.id] = rec; res(false); }
+  });
+}
+async function idbGet(id) {
+  const db = await openDB();
+  if (!db) return memVideos[id] || null;
+  return new Promise((res) => {
+    try {
+      const tx = db.transaction(DB_STORE, 'readonly');
+      const r = tx.objectStore(DB_STORE).get(id);
+      r.onsuccess = () => res(r.result || memVideos[id] || null);
+      r.onerror = () => res(memVideos[id] || null);
+    } catch (e) { res(memVideos[id] || null); }
+  });
+}
+async function idbDel(id) {
+  delete memVideos[id];
+  const db = await openDB(); if (!db) return;
+  try { const tx = db.transaction(DB_STORE, 'readwrite'); tx.objectStore(DB_STORE).delete(id); } catch (e) {}
+}
+async function idbClear() {
+  for (const k in memVideos) delete memVideos[k];
+  const db = await openDB(); if (!db) return;
+  try { const tx = db.transaction(DB_STORE, 'readwrite'); tx.objectStore(DB_STORE).clear(); } catch (e) {}
+}
+
+/* ---------------------------- state ---------------------------- */
+const K = { products: 'ttbp_products', logs: 'ttbp_logs', plans: 'ttbp_plans', settings: 'ttbp_settings' };
+const state = {
+  products: load(K.products, []),
+  logs:     load(K.logs, []),
+  plans:    load(K.plans, {}),
+  settings: load(K.settings, { lang: 'bm', week: null, lastImport: null }),
+  sort:     { key: 'date', dir: 'desc' },
+  tab:      'plan',
+  subtab:   {}   // productId -> 'captions' | 'toc'
+};
+function load(k, dflt) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? dflt : v; } catch (e) { return dflt; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast('Storage full — export & clear old data', 'err'); } }
+const saveAll = () => { save(K.products, state.products); save(K.logs, state.logs); save(K.plans, state.plans); save(K.settings, state.settings); };
+
+const getProduct = (id) => state.products.find(p => p.id === id) || null;
+function getVideo(pid, vid) { const p = getProduct(pid); return p ? (p.videos.find(v => v.id === vid) || null) : null; }
+const thumbCache = {};
+
+/* ---------------------------- language + benefit vocabulary ---------------------------- */
+const PRESET_TAGS = ['Jimat masa', 'Mudah cuci', 'Sesuai student', 'Harga murah', 'Non-stick', 'Portable', 'Multifungsi'];
+/* `pain` values are NOUN phrases and `ben` values are predicate phrases — the hook
+   templates below slot them into fixed frames, so mixing the two grammatical types
+   is what produces sentences like "this thing one tool, many jobs". Keep the shapes
+   consistent when adding a tag: pain answers "a problem with ___", ben answers "it ___". */
+const TAGMETA = {
+  'Jimat masa':     { pain:{bm:'kerja dapur makan masa',      en:'kitchen prep taking forever'},      ben:{bm:'jimat masa masak',            en:'saves you real time'},              short:{bm:'Jimat masa',      en:'Saves time'},      tags:['#jimatmasa','#tipsdapur'] },
+  'Mudah cuci':     { pain:{bm:'bekas berminyak susah cuci',  en:'greasy dishes that never come clean'}, ben:{bm:'senang nak cuci, bilas je',en:'rinses clean in seconds'},          short:{bm:'Senang cuci',     en:'Easy to clean'},   tags:['#mudahcuci','#kitchenhacks'] },
+  'Sesuai student': { pain:{bm:'duit poket tak cukup',        en:'a tight student budget'},           ben:{bm:'sesuai student & rumah sewa', en:'perfect for students & rentals'},   short:{bm:'Sesuai student',  en:'Student-friendly'},tags:['#studentmalaysia','#rumahsewa'] },
+  'Harga murah':    { pain:{bm:'barang dapur mahal',          en:'overpriced kitchen gear'},          ben:{bm:'harga sangat berbaloi',       en:'seriously good value'},             short:{bm:'Harga berbaloi',  en:'Great value'},     tags:['#murahberbaloi','#budgetfinds'] },
+  'Non-stick':      { pain:{bm:'makanan melekat kat kuali',   en:'food sticking to the pan'},         ben:{bm:'tak melekat langsung',        en:'nothing sticks to it'},             short:{bm:'Tak melekat',     en:'Non-stick'},       tags:['#nonstick','#kualiviral'] },
+  'Portable':       { pain:{bm:'barang besar susah simpan',   en:'bulky gear with nowhere to go'},    ben:{bm:'kecil, senang bawa & simpan', en:'compact and easy to store'},        short:{bm:'Kecil & senang',  en:'Compact'},         tags:['#portable','#smallkitchen'] },
+  'Multifungsi':    { pain:{bm:'dapur penuh barang',          en:'a drawer full of gadgets'},         ben:{bm:'satu barang banyak fungsi',   en:'one tool, many jobs'},              short:{bm:'Multifungsi',     en:'Multi-use'},       tags:['#multifungsi','#kitchengadget'] }
+};
+const FALLBACK = { pain:{bm:'kerja dapur tak habis-habis', en:'endless kitchen chores'},
+                   ben:{bm:'senangkan kerja dapur', en:'makes kitchen work easier'},
+                   short:{bm:'Senangkan kerja', en:'Makes it easier'} };
+const POOL_TAGS = ['#barangdapur','#dapurviral','#kitchenfinds','#tipsdapur','#racuntiktok','#fypmalaysia','#homeessentials','#dapurcantik'];
+const HOOKS = [
+  { key: 'question', label: 'Question', emoji: '❓' },
+  { key: 'pov',      label: 'POV',      emoji: '🎬' },
+  { key: 'price',    label: 'Price',    emoji: '💸' }
+];
+const hookLabel = (k) => (HOOKS.find(h => h.key === k) || { label: k || 'Unknown' }).label;
+const hookIndex = (k) => Math.max(0, HOOKS.findIndex(h => h.key === k));
+const LANGS = [['bm','BM Santai'], ['en','English'], ['mix','Mix']];
+const langLabel = (l) => (LANGS.find(x => x[0] === l) || ['','BM'])[1];
+
+function meta(p, which, lang) {
+  const t = (p.tags || []).find(x => TAGMETA[x]);
+  const src = t ? TAGMETA[t] : FALLBACK;
+  const l = (lang === 'en') ? 'en' : 'bm';
+  return (src[which] && src[which][l]) || FALLBACK[which][l];
+}
+const metaEn = (p, which) => { const t = (p.tags || []).find(x => TAGMETA[x]); return (t ? TAGMETA[t] : FALLBACK)[which].en; };
+function firstSentence(txt, max) {
+  const s = String(txt || '').trim().replace(/\s+/g, ' ');
+  if (!s) return '';
+  const m = s.match(/^(.{10,}?[.!?])\s/);
+  const out = m ? m[1] : s;
+  return out.length > (max || 110) ? out.slice(0, (max || 110)).trim() + '…' : out;
+}
+const discountPct = (promo) => { const m = String(promo || '').match(/(\d{1,2})\s*%/); return m ? m[1] : null; };
+const priceOf = (p) => (p.price || '').toString().replace(/^rm\s*/i, '').trim() || '??';
+
+/* ---------------------------- captions ---------------------------- */
+function buildHashtags(p) {
+  const out = [];
+  (p.tags || []).forEach(t => { if (TAGMETA[t]) TAGMETA[t].tags.forEach(h => { if (out.length < 3 && !out.includes(h)) out.push(h); }); });
+  const pool = POOL_TAGS.slice().sort(() => Math.random() - 0.5);
+  while (out.length < 3) { const h = pool.pop(); if (!h) break; if (!out.includes(h)) out.push(h); }
+  out.push('#TikTokShopMalaysia');
+  return out.slice(0, 5).join(' ');
+}
+function proofLine(p, lang) {
+  if (p.limited) return lang === 'en' ? 'Limited stock on this one — grab it before it goes.'
+                       : lang === 'mix' ? 'Stok limited je — jangan tunggu lama.'
+                       : 'Stok terhad — jangan tunggu lama.';
+  const bm = ['Ramai yang dah beli & repeat order.', 'Review dalam TikTok Shop pun okay.', 'Bukan barang baru — memang laris.'];
+  const en = ['Loads of repeat buyers on this one.', 'Reviews on TikTok Shop speak for themselves.', 'People keep re-ordering this.'];
+  const mx = ['Ramai dah beli & repeat order — check reviews.', 'Review dalam TikTok Shop memang okay.'];
+  return lang === 'en' ? pick(en) : lang === 'mix' ? pick(mx) : pick(bm);
+}
+function makeHook(p, hook, lang) {
+  const price = priceOf(p), pct = discountPct(p.promo);
+  if (hook === 'question') {
+    // Frames take a NOUN phrase, so every tag slots in grammatically.
+    const pBm = meta(p, 'pain', 'bm'), pEn = meta(p, 'pain', 'en');
+    if (lang === 'en')  return pick(['Tired of ' + pEn + '?', 'Anyone else dealing with ' + pEn + '?', 'Why is nobody talking about this?']);
+    if (lang === 'mix') return pick(['Siapa kat sini still ada masalah ' + pBm + '?', 'Penat dengan ' + pBm + '? Same.', 'Korang ada masalah ni tak?']);
+    return pick(['Siapa kat sini ada masalah ' + pBm + '?', 'Masalah ' + pBm + '? Sama.', 'Korang ada masalah ni tak kat rumah?']);
+  }
+  if (hook === 'pov') {
+    // Benefit phrases are predicates, so they get their own sentence rather than
+    // being glued onto "this thing ___", which only reads for some of them.
+    const bBm = meta(p, 'ben', 'bm'), bEn = meta(p, 'ben', 'en');
+    if (lang === 'en')  return pick(['POV: You get home exhausted but dinner still happens.', 'POV: Home late. ' + cap1(bEn) + '.']);
+    if (lang === 'mix') return pick(['POV: Balik kerja penat. ' + cap1(bEn) + '.', 'POV: Penat balik kerja, tapi dapur settle in 10 minutes.']);
+    return pick(['POV: Balik kerja penat tapi benda ni ' + bBm + '.', 'POV: Penat balik kerja, tapi kerja dapur settle je.']);
+  }
+  if (pct) return lang === 'en' ? 'Wait… ' + pct + '% off?!' : 'Diskaun ' + pct + '%?! Biar betul.';
+  if (lang === 'en')  return 'RM' + price + '? Are you serious?!';
+  if (lang === 'mix') return 'Wait, RM' + price + ' je?! Murah dari lunch aku.';
+  return 'Biar betul RM' + price + ' je?!';
+}
+function generateCaptions(p, lang) {
+  lang = lang || 'bm';
+  return HOOKS.map(h => {
+    const hook = makeHook(p, h.key, lang);
+    const benefit = lang === 'en' ? meta(p, 'ben', 'en') : (lang === 'mix' ? metaEn(p, 'ben') : meta(p, 'ben', 'bm'));
+    const desc = firstSentence(p.desc, 120);
+    const body = [];
+    if (desc) body.push(desc);
+    body.push((lang === 'en' ? 'Best part: ' : 'Paling best: ') + benefit + '.');
+    body.push(proofLine(p, lang));
+    if (p.promo && !discountPct(p.promo)) body.push(String(p.promo).trim());
+    return { hook: h.key, lang: lang, text: [
+      hook, '', body.join('\n'), '',
+      'Tekan beg kuning tengok harga 👇',
+      '(Disclaimer: Harga tertakluk pada promosi semasa)', '',
+      buildHashtags(p)
+    ].join('\n') };
+  });
+}
+function captionsFor(p, forceNew) {
+  const lang = state.settings.lang || 'bm';
+  p.captionCache = p.captionCache || {};
+  if (forceNew || !p.captionCache[lang] || p.captionCache[lang].length !== 3) {
+    p.captionCache[lang] = generateCaptions(p, lang);
+    // Captions changed, so every TOC hook line that mirrors them is stale.
+    (p.videos || []).forEach(v => { if (v.tocCache) delete v.tocCache[lang]; });
+    save(K.products, state.products);
+  }
+  return p.captionCache[lang];
+}
+/* The TOC hook must be the SAME sentence as the caption hook, so the on-screen
+   text and the caption read as one idea rather than two competing ones. */
+const captionHookLine = (p, angle) => captionsFor(p)[hookIndex(angle)].text.split('\n')[0];
+
+/* =========================================================================
+   TOC (Text-On-Screen) SCRIPT GENERATOR
+   His best videos are 10-17s and SILENT — the on-screen text carries the whole
+   message, so lines stay short and one idea each.
+   ========================================================================= */
+const TOC_SEC_PER_SCENE = 3.5;
+const TOC_MAX_CHARS = 72;          // ~2 short lines on a phone; longer stops being readable at speed
+
+function sceneCount(duration) {
+  const d = Number(duration) > 0 ? Number(duration) : 15;   // assume 15s when unknown
+  const base = Math.round(d / TOC_SEC_PER_SCENE);
+  if (d < 10)  return clamp(base, 2, 3);
+  if (d >= 20) return clamp(base, 5, 6);
+  return clamp(base, 3, 5);
+}
+function sceneTimes(duration, n) {
+  const d = Number(duration) > 0 ? Number(duration) : 15;
+  const step = d / n, out = [];
+  for (let i = 0; i < n; i++) {
+    const a = i * step, b = (i === n - 1) ? d : (i + 1) * step;
+    out.push([Math.round(a * 10) / 10, Math.round(b * 10) / 10]);
+  }
+  return out;
+}
+function densityLabel(n) { return n <= 3 ? 'full' : n <= 5 ? 'medium' : 'short'; }
+
+/* Beat plans: which elements land in which scene, per angle and scene count.
+   Fewer scenes = more elements per line; 6 scenes = one idea per line. */
+const TOC_PLANS = {
+  question: {
+    2: [['hook','name'], ['price','cta']],
+    3: [['hook'], ['name','benefit','price'], ['cta']],
+    4: [['hook'], ['name','benefit'], ['price'], ['cta']],
+    5: [['hook'], ['problem'], ['name','benefit'], ['price'], ['cta']],
+    6: [['hook'], ['problem'], ['name'], ['benefit'], ['price'], ['cta']]
+  },
+  pov: {
+    2: [['hook','name'], ['price','cta']],
+    3: [['hook'], ['problem','name','price'], ['cta']],
+    4: [['hook'], ['problem'], ['name','price'], ['cta']],
+    5: [['hook'], ['problem'], ['name','benefit'], ['price'], ['cta']],
+    6: [['hook'], ['problem'], ['name'], ['benefit'], ['price'], ['cta']]
+  },
+  price: {
+    2: [['hook'], ['name','cta']],
+    3: [['hook'], ['name','promo','benefit'], ['cta']],
+    4: [['hook'], ['name','promo'], ['benefit'], ['cta']],
+    5: [['hook'], ['name','promo'], ['benefit'], ['proof'], ['cta']],
+    6: [['hook'], ['price'], ['name'], ['benefit'], ['proof'], ['cta']]
+  }
+};
+function tocElement(kind, p, angle, lang) {
+  const price = priceOf(p), pct = discountPct(p.promo);
+  switch (kind) {
+    case 'hook':    return captionHookLine(p, angle);
+    case 'problem': return cap1(lang === 'en' ? meta(p, 'pain', 'en') : meta(p, 'pain', 'bm')) + '?';
+    case 'name':    return p.name;
+    case 'benefit': {
+      const t = (p.tags || []).find(x => TAGMETA[x]);
+      const src = t ? TAGMETA[t] : FALLBACK;
+      return (lang === 'en' ? src.short.en : src.short.bm);
+    }
+    case 'price':   return lang === 'en' ? ('Only RM' + price) : ('Harga RM' + price + ' je');
+    case 'promo':
+      if (pct) return lang === 'en' ? (pct + '% off now') : ('Diskaun ' + pct + '% sekarang');
+      if (p.promo) return String(p.promo).trim();
+      return lang === 'en' ? ('Only RM' + price) : ('Harga RM' + price + ' je');
+    case 'proof':
+      if (p.limited) return lang === 'en' ? 'Limited stock' : 'Stok terhad';
+      return lang === 'en' ? 'Repeat buyers love it' : 'Ramai dah repeat order';
+    case 'cta':     return lang === 'en' ? 'Tap the yellow bag 👇' : 'Tekan beg kuning tengok harga';
+  }
+  return '';
+}
+/* Strip trailing separators and dangling connectives so a shortened line still ends
+   like a finished thought instead of "Rak Dapur Multifungsi —". */
+const TRAIL_JUNK = /(?:[\s—–\-,;:]+|\s+(?:tapi|dan|nak|yang|untuk|dengan|but|and|the|with|for|to))$/i;
+function tidy(s) {
+  s = String(s || '').replace(/\s+/g, ' ').trim();
+  let prev;
+  do { prev = s; s = s.replace(TRAIL_JUNK, '').trim(); } while (s !== prev);
+  return s;
+}
+function trimLine(s) {
+  s = String(s || '').replace(/\s+/g, ' ').trim();
+  if (s.length <= TOC_MAX_CHARS) return tidy(s);
+  const cut = s.slice(0, TOC_MAX_CHARS + 1);
+  const sp = cut.lastIndexOf(' ');
+  return tidy(sp > 24 ? cut.slice(0, sp) : cut.slice(0, TOC_MAX_CHARS));
+}
+/* Merge a scene's elements. Two rules keep the result readable: skip anything already
+   said (product names often contain their own benefit word), and if an element won't
+   fit, drop it whole rather than truncating mid-phrase. */
+function mergeParts(parts) {
+  let line = '';
+  for (let i = 0; i < parts.length; i++) {
+    const part = tidy(parts[i]);
+    if (!part) continue;
+    if (line.toLowerCase().indexOf(part.toLowerCase()) > -1) continue;
+    if (!line) { line = part.length > TOC_MAX_CHARS ? trimLine(part) : part; continue; }
+    const next = line + ' — ' + part;
+    if (next.length <= TOC_MAX_CHARS) line = next;
+  }
+  return tidy(line);
+}
+function generateTOC(p, v, angle, lang) {
+  const n = sceneCount(v.duration);
+  const plan = (TOC_PLANS[angle] && TOC_PLANS[angle][n]) || TOC_PLANS[angle][4];
+  return plan.map(beats => mergeParts(beats.map(b => tocElement(b, p, angle, lang))));
+}
+function tocFor(p, v, angle, forceNew) {
+  const lang = state.settings.lang || 'bm';
+  // Resolve captions FIRST. generateTOC reads the caption hook, and if captions have to be
+  // built for this language on the way through, captionsFor() clears v.tocCache[lang] —
+  // which would wipe the slot we were mid-way through writing.
+  captionsFor(p);
+  v.tocCache = v.tocCache || {};
+  if (forceNew) v.tocCache = {};
+  if (!v.tocCache[lang]) v.tocCache[lang] = {};
+  if (!v.tocCache[lang][angle] || !v.tocCache[lang][angle].length) {
+    const lines = generateTOC(p, v, angle, lang);
+    if (!v.tocCache[lang]) v.tocCache[lang] = {};
+    v.tocCache[lang][angle] = lines;
+    save(K.products, state.products);
+  }
+  return v.tocCache[lang][angle];
+}
+const tocPlainText = (lines) => lines.join('\n');
+
+/* ---------------------------- products / videos ---------------------------- */
+function newProduct(o) {
+  return Object.assign({ id: uid(), name:'', price:'', promo:'', link:'', desc:'',
+    tags:[], limited:false, videos:[], captionCache:{}, createdAt: ymd(new Date()) }, o || {});
+}
+function newVideo(o) {
+  return Object.assign({ id: uid(), label:'Clip 1', file:'', hasFile:false, duration:null,
+    tiktokId:'', timesPosted:0, lastPosted:null, history:[], tocCache:{} }, o || {});
+}
+async function getThumb(videoId) {
+  if (thumbCache[videoId] !== undefined) return thumbCache[videoId];
+  const rec = await idbGet(videoId);
+  thumbCache[videoId] = (rec && rec.thumb) ? rec.thumb : null;
+  return thumbCache[videoId];
+}
+/* Pull the thumbnail AND the duration in one pass — duration drives the whole TOC engine. */
+function probeVideo(file) {
+  return new Promise((resolve) => {
+    try {
+      const url = URL.createObjectURL(file);
+      const v = document.createElement('video');
+      v.preload = 'metadata'; v.muted = true; v.playsInline = true; v.src = url;
+      let done = false, dur = null;
+      const finish = (thumb) => { if (done) return; done = true; URL.revokeObjectURL(url); resolve({ thumb: thumb, duration: dur }); };
+      v.onloadedmetadata = () => { if (isFinite(v.duration) && v.duration > 0) dur = Math.round(v.duration * 10) / 10; };
+      v.onloadeddata = () => { try { v.currentTime = Math.min(0.6, (v.duration || 1) / 3); } catch (e) { finish(null); } };
+      v.onseeked = () => {
+        try {
+          const c = document.createElement('canvas');
+          const w = 180, h = Math.round(w * (v.videoHeight / v.videoWidth || 16 / 9));
+          c.width = w; c.height = h;
+          c.getContext('2d').drawImage(v, 0, 0, w, h);
+          finish(c.toDataURL('image/jpeg', 0.7));
+        } catch (e) { finish(null); }
+      };
+      v.onerror = () => finish(null);
+      setTimeout(() => finish(null), 8000);
+    } catch (e) { resolve({ thumb: null, duration: null }); }
+  });
+}
+async function attachFile(pid, vid, file) {
+  const v = getVideo(pid, vid); if (!v) return;
+  const probe = await probeVideo(file);
+  const ok = await idbPut({ id: vid, blob: file, thumb: probe.thumb, name: file.name, type: file.type });
+  v.hasFile = true; v.file = file.name;
+  if (probe.duration) v.duration = probe.duration;
+  v.tocCache = {};                       // duration changed → scene plan changes
+  thumbCache[vid] = probe.thumb;
+  save(K.products, state.products);
+  render();
+  toast(probe.duration ? ('Saved · ' + probe.duration + 's → ' + sceneCount(probe.duration) + ' scenes')
+                       : (ok ? 'Video saved ✓' : 'Saved for this session only'), ok ? '' : 'warn');
+}
+
+/* ---------------------------- weekly planner ---------------------------- */
+const DAYS = [['Mon','Isnin'],['Tue','Selasa'],['Wed','Rabu'],['Thu','Khamis'],['Fri','Jumaat'],['Sat','Sabtu'],['Sun','Ahad']];
+const CHECKLIST = [
+  'Edit 7 clips in CapCut (apply template, tweak first 2 sec on reposts)',
+  'Open tiktok.com → Upload → Schedule all 7',
+  'Paste caption + TOC script + yellow-bag link for each',
+  'Confirm all 7 scheduled'
+];
+function currentWeekKey() {
+  if (!state.settings.week) state.settings.week = ymd(mondayOf(new Date()));
+  return state.settings.week;
+}
+function allVideos() {
+  const out = [];
+  state.products.forEach(p => (p.videos || []).forEach(v => out.push({ p: p, v: v })));
+  return out;
+}
+/* Recent engagement (from the last CSV import) is the third priority signal:
+   a product that pulled well last week deserves another slot this week. */
+function recentEngagement(pid) {
+  const ls = state.logs.filter(l => l.productId === pid && daysSince(l.date) != null && daysSince(l.date) <= 14 && l.views > 0);
+  if (!ls.length) return 0;
+  const avgViews = ls.reduce((a, l) => a + l.views, 0) / ls.length;
+  const avgEr = ls.reduce((a, l) => a + (er(l) || 0), 0) / ls.length;
+  return Math.min(avgViews / 50, 120) + Math.min(avgEr * 6, 60);   // capped, see below
+}
+function videoScore(p, v) {
+  // Every term is capped so no single signal can swamp the anti-repeat penalties.
+  const since = Math.min(v.lastPosted ? (daysSince(v.lastPosted) || 0) : 60, 60);
+  const recentLogs = state.logs.filter(l => l.productId === p.id && daysSince(l.date) != null && daysSince(l.date) <= 14).length;
+  let s = since * 8;                       // (a) longest time since posting, 0–480
+  if (recentLogs === 0) s += 60;           // (b) products with 0 recent posts
+  if (!v.timesPosted) s += 40;             // fresh clips need no re-edit
+  s += recentEngagement(p.id);             // (c) what actually worked last week, 0–180
+  s -= (v.timesPosted || 0) * 6;
+  return s;
+}
+const REUSE_PENALTY = 120, BACKTOBACK_PENALTY = 400;
+function buildPlan(weekKey) {
+  const start = new Date(weekKey + 'T00:00:00');
+  const pool = allVideos().map(x => ({ p: x.p, v: x.v, score: videoScore(x.p, x.v) })).sort((a, b) => b.score - a.score);
+  const slots = [], used = {};
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start.getTime() + i * DAY_MS);
+    let choice = null;
+    if (pool.length) {
+      const lastPid = slots.length ? slots[slots.length - 1].productId : null;
+      const adj = (x) => x.score - (used[x.p.id] || 0) * REUSE_PENALTY - (x.p.id === lastPid ? BACKTOBACK_PENALTY : 0);
+      choice = pool.slice().sort((a, b) => adj(b) - adj(a))[0];
+      used[choice.p.id] = (used[choice.p.id] || 0) + 1;
+    }
+    slots.push({
+      day: i, date: ymd(d),
+      productId: choice ? choice.p.id : null,
+      videoId: choice ? choice.v.id : null,
+      hookIdx: i % 3,
+      tocIdx: i % 3,                        // defaults to the caption angle — keeps them aligned
+      scheduled: false, scheduledAt: null, hookUsed: null, tocUsed: null
+    });
+  }
+  return { slots: slots, checklist: [false, false, false, false] };
+}
+function getPlan(weekKey, create) {
+  if (!state.plans[weekKey] && create !== false) { state.plans[weekKey] = buildPlan(weekKey); save(K.plans, state.plans); }
+  const pl = state.plans[weekKey];
+  if (pl) pl.slots.forEach(s => { if (s.tocIdx == null) s.tocIdx = s.hookIdx; });   // migrate v1 plans
+  return pl;
+}
+
+/* ---------------------------- Sunday reminder ---------------------------- */
+function importDue() {
+  const isSunday = new Date().getDay() === 0;
+  const since = state.settings.lastImport ? daysSince(state.settings.lastImport) : null;
+  return { due: isSunday || since == null || since >= 7, isSunday: isSunday, since: since };
+}
+
+/* ---------------------------- CSV ---------------------------- */
+function parseCSV(text) {
+  text = String(text).replace(/^﻿/, '');
+  const head = (text.split(/\r?\n/)[0] || '');
+  const delim = (head.split('\t').length > head.split(',').length) ? '\t'
+              : (head.split(';').length > head.split(',').length) ? ';' : ',';
+  const rows = []; let row = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else {
+      if (c === '"') q = true;
+      else if (c === delim) { row.push(cur); cur = ''; }
+      else if (c === '\n') { row.push(cur); cur = ''; rows.push(row); row = []; }
+      else if (c !== '\r') cur += c;
+    }
+  }
+  if (cur.length || row.length) { row.push(cur); rows.push(row); }
+  return rows.filter(r => r.some(x => String(x).trim() !== ''));
+}
+const COLMAP = {
+  videoId: ['video_id','videoid','video id','item_id','id','post_id','video'],
+  views:   ['views','video views','video_views','vv','play','plays','total views','tayangan'],
+  likes:   ['likes','like','total likes','hearts','diggs','suka'],
+  comments:['comments','comment','total comments','komen'],
+  shares:  ['shares','share','total shares','kongsi'],
+  orders:  ['orders','order','items sold','sku orders','units sold','pesanan'],
+  date:    ['create_date','createdate','create time','created','date','post time','publish time','posted','tarikh']
+};
+function mapHeaders(header) {
+  const norm = header.map(h => String(h).trim().toLowerCase().replace(/[^a-z0-9 _]/g, ''));
+  const idx = {};
+  Object.keys(COLMAP).forEach(key => {
+    let best = -1;
+    COLMAP[key].forEach(cand => {
+      if (best >= 0) return;
+      let i = norm.indexOf(cand);
+      if (i < 0) i = norm.findIndex(h => h.replace(/[ _]/g, '') === cand.replace(/[ _]/g, ''));
+      if (i < 0) i = norm.findIndex(h => h.includes(cand));
+      if (i >= 0) best = i;
+    });
+    idx[key] = best;
+  });
+  return idx;
+}
+function parseAnyDate(s) {
+  s = String(s == null ? '' : s).trim();
+  if (!s) return null;
+  if (/^\d{13}$/.test(s)) return ymd(new Date(Number(s)));
+  if (/^\d{9,11}$/.test(s)) return ymd(new Date(Number(s) * 1000));
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);  if (m) return ymd(new Date(+m[1], +m[2] - 1, +m[3]));
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);    if (m) return ymd(new Date(+m[3], +m[1] - 1, +m[2]));  // M/D/YYYY
+  m = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);      if (m) return ymd(new Date(+m[3], +m[2] - 1, +m[1]));  // D-M-YYYY
+  const d = new Date(s);
+  return isNaN(d) ? null : ymd(d);
+}
+const num = (s) => { const n = Number(String(s == null ? '' : s).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? null : n; };
+function findByTiktokId(tid) {
+  tid = String(tid || '').trim(); if (!tid) return null;
+  for (const p of state.products) for (const v of (p.videos || []))
+    if (String(v.tiktokId || '').trim() === tid) return { p: p, v: v };
+  return null;
+}
+/* Which angle was this video posted with? Use the closest scheduled entry by date. */
+function historyForDate(v, date) {
+  const h = (v && v.history) ? v.history.slice() : [];
+  if (!h.length) return null;
+  if (!date) return h[h.length - 1];
+  const t = new Date(date + 'T00:00:00').getTime();
+  h.sort((a, b) => Math.abs(new Date(a.date + 'T00:00:00') - t) - Math.abs(new Date(b.date + 'T00:00:00') - t));
+  return h[0];
+}
+
+/* ---------------------------- analytics ---------------------------- */
+const er = (l) => (l.views > 0) ? (((l.likes || 0) + (l.comments || 0) + (l.shares || 0)) / l.views * 100) : null;
+const lr = (l) => (l.views > 0) ? ((l.likes || 0) / l.views * 100) : null;
+function angleStats(logs, field) {
+  const out = {};
+  HOOKS.forEach(h => out[h.key] = { n: 0, views: 0, er: 0 });
+  logs.forEach(l => {
+    const k = l[field]; if (!out[k]) return;
+    out[k].n++; out[k].views += (l.views || 0);
+    const e = er(l); if (e != null) out[k].er += e;
+  });
+  Object.keys(out).forEach(k => {
+    out[k].avgViews = out[k].n ? Math.round(out[k].views / out[k].n) : 0;
+    out[k].avgER = out[k].n ? (out[k].er / out[k].n) : 0;
+  });
+  return out;
+}
+function bestAngle(logs, field) {
+  const s = angleStats(logs, field);
+  let best = null;
+  Object.keys(s).forEach(k => { if (s[k].n > 0 && (!best || s[k].avgViews > s[best].avgViews)) best = k; });
+  return best ? { key: best, avgViews: s[best].avgViews, n: s[best].n } : null;
+}
+
+/* =========================================================================
+   TIKTOK CONNECTION  (talks to the serverless functions in netlify/functions)
+   Everything here is optional — if the functions aren't deployed, or you're
+   offline, these calls fail quietly and the app keeps working exactly as before.
+   ========================================================================= */
+state.tt = { connected: false, username: '', checked: false, busy: false };
+
+async function ttFetch(path, opts) {
+  const r = await fetch(path, Object.assign({ credentials: 'same-origin' }, opts || {}));
+  const ct = r.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) throw new Error('Server did not return JSON — are the functions deployed?');
+  return r.json();
+}
+async function ttCheck(quiet) {
+  try {
+    const d = await ttFetch('/api/tiktok/me');
+    state.tt.connected = !!d.connected;
+    state.tt.username = d.username || '';
+  } catch (e) {
+    state.tt.connected = false;
+    if (!quiet) toast('Could not reach TikTok connection', 'warn');
+  }
+  state.tt.checked = true;
+  render();
+}
+async function ttLogout() {
+  try { await ttFetch('/api/tiktok/logout', { method: 'POST' }); } catch (e) {}
+  state.tt.connected = false; state.tt.username = '';
+  render(); toast('Disconnected from TikTok');
+}
+/* Pull recent post metrics and merge them into the performance log, matching on
+   the TikTok video id. Same shape as a CSV import, just without the CSV. */
+async function ttSync() {
+  if (state.tt.busy) return;
+  state.tt.busy = true; render();
+  try {
+    const d = await ttFetch('/api/tiktok/stats');
+    if (d.error) { toast('TikTok: ' + d.error, 'err'); return; }
+    let added = 0, updated = 0, unmatched = 0;
+    (d.videos || []).forEach(v => {
+      const match = findByTiktokId(v.id);
+      const dupe = state.logs.find(l => l.tiktokId === v.id && l.date === v.date);
+      if (dupe) {
+        Object.assign(dupe, { views: v.views, likes: v.likes, comments: v.comments, shares: v.shares });
+        updated++;
+      } else if (match) {
+        const hist = historyForDate(match.v, v.date);
+        state.logs.push({
+          id: uid(), productId: match.p.id, videoId: match.v.id, tiktokId: v.id,
+          hook: (hist && hist.hook) || 'unknown', toc: (hist && hist.toc) || 'unknown',
+          date: v.date, views: v.views, likes: v.likes, comments: v.comments,
+          shares: v.shares, orders: 0, source: 'tiktok'
+        });
+        added++;
+      } else unmatched++;
+    });
+    state.settings.lastImport = ymd(new Date());
+    saveAll();
+    toast('Synced · ' + added + ' new, ' + updated + ' updated' + (unmatched ? ', ' + unmatched + ' unmatched' : ''));
+  } catch (e) {
+    toast(e.message || 'Sync failed', 'err');
+  } finally {
+    state.tt.busy = false; render();
+  }
+}
+/* Send a clip to TikTok. The function hands back an upload URL and the browser
+   PUTs the bytes straight to TikTok, so the video never passes through the server. */
+async function ttUpload(pid, vid) {
+  if (state.tt.busy) return;
+  const rec = await idbGet(vid);
+  if (!rec || !rec.blob) { toast('No video file stored for this clip', 'warn'); return; }
+  state.tt.busy = true; render();
+  try {
+    const init = await ttFetch('/api/tiktok/upload-init', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ video_size: rec.blob.size })
+    });
+    if (init.error) { toast('TikTok: ' + init.error, 'err'); return; }
+    toast('Uploading to TikTok…');
+    const put = await fetch(init.upload_url, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': rec.blob.type || 'video/mp4',
+        'Content-Range': 'bytes 0-' + (rec.blob.size - 1) + '/' + rec.blob.size
+      },
+      body: rec.blob
+    });
+    if (!put.ok) { toast('Upload failed (' + put.status + ')', 'err'); return; }
+    toast('Sent ✓ Open your TikTok notifications to finish the post');
+  } catch (e) {
+    toast(e.message || 'Upload failed', 'err');
+  } finally {
+    state.tt.busy = false; render();
+  }
+}
+function ttPanel() {
+  if (!state.tt.checked) return '';
+  if (!state.tt.connected) {
+    return '<div class="bg-white border border-stone-200 rounded-2xl p-4 mb-4">' +
+      '<h3 class="font-bold text-[14px]">Connect TikTok</h3>' +
+      '<p class="text-[12px] text-stone-500 mt-1 mb-3 leading-snug">Connect your account to sync post stats automatically and send clips straight to TikTok — no CSV export needed.</p>' +
+      '<a href="/api/tiktok/login" class="tap w-full bg-stone-900 text-white rounded-xl text-[13px] font-semibold flex items-center justify-center">Log in with TikTok</a></div>';
+  }
+  return '<div class="bg-white border border-emerald-300 rounded-2xl p-4 mb-4">' +
+    '<div class="flex items-center justify-between gap-2">' +
+      '<div class="min-w-0"><div class="text-[11px] font-bold text-emerald-700 uppercase tracking-wide">TikTok connected</div>' +
+      '<div class="font-bold text-[14px] truncate">' + esc(state.tt.username || 'your account') + '</div></div>' +
+      '<button data-action="tt-logout" class="text-[11px] font-semibold text-stone-500 underline shrink-0">Disconnect</button></div>' +
+    '<button data-action="tt-sync" class="tap w-full mt-3 bg-stone-900 text-white rounded-xl text-[13px] font-semibold"' + (state.tt.busy ? ' disabled' : '') + '>' +
+      (state.tt.busy ? 'Working…' : '⟳ Sync stats from TikTok') + '</button></div>';
+}
+
+/* =========================================================================
+   TAB 1 — PLAN MY WEEK
+   ========================================================================= */
+function reminderBanner() {
+  const r = importDue();
+  if (!r.due || !state.products.length) return '';
+  const sub = r.since == null ? 'No import yet — start the weekly ritual.'
+            : r.since >= 7 ? ('Last import was ' + r.since + ' days ago.')
+            : 'It’s Sunday — batch day.';
+  return '<div class="bg-stone-900 text-white rounded-2xl p-4 mb-4">' +
+    '<div class="text-[14px] font-bold leading-snug">📊 Time to review last week’s performance</div>' +
+    '<p class="text-[12px] text-stone-300 mt-1 leading-snug">' + esc(sub) + ' Export your TikTok analytics CSV and import it here, then plan next week.</p>' +
+    '<button data-action="import-csv" class="tap w-full mt-3 bg-white text-stone-900 rounded-xl text-[13px] font-bold">Import this week’s CSV</button>' +
+  '</div>';
+}
+function renderPlan() {
+  const wk = currentWeekKey(), plan = getPlan(wk);
+  const start = new Date(wk + 'T00:00:00'), end = new Date(start.getTime() + 6 * DAY_MS);
+  const thisWeek = wk === ymd(mondayOf(new Date()));
+  const done = plan.slots.filter(s => s.scheduled).length;
+  let h = reminderBanner();
+
+  h += '<div class="flex items-center justify-between gap-2 mb-3">' +
+    '<button data-action="week" data-d="-1" class="w-11 h-11 rounded-xl border border-stone-300 bg-white text-[18px]">‹</button>' +
+    '<div class="text-center leading-tight"><div class="text-[15px] font-bold">' + shortDate(wk) + ' – ' + shortDate(ymd(end)) + '</div>' +
+    '<div class="text-[11px] text-stone-500">' + (thisWeek ? 'This week' : 'Week of ' + wk) + ' · ' + done + '/7 scheduled</div></div>' +
+    '<button data-action="week" data-d="1" class="w-11 h-11 rounded-xl border border-stone-300 bg-white text-[18px]">›</button></div>';
+
+  h += '<div class="flex items-center gap-2 mb-1">' +
+    '<div class="flex-1 flex bg-stone-200/70 rounded-xl p-1">' +
+      LANGS.map(l => '<button data-action="lang" data-v="' + l[0] + '" class="flex-1 text-[12px] font-semibold py-2 rounded-lg ' +
+        (state.settings.lang === l[0] ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500') + '">' + l[1] + '</button>').join('') +
+    '</div>' +
+    '<button data-action="replan" class="tap px-3 rounded-xl border border-stone-300 bg-white text-[12px] font-semibold">↻ Re-plan</button></div>' +
+    '<p class="text-[10.5px] text-stone-400 mb-4 px-1">Language applies to both captions and TOC scripts.</p>';
+
+  if (!state.products.length) {
+    h += '<div class="bg-white border border-stone-200 rounded-2xl p-5 text-center">' +
+      '<div class="text-[34px] mb-1">📦</div><h3 class="font-bold text-[15px]">No products yet</h3>' +
+      '<p class="text-[13px] text-stone-500 mt-1 mb-4">Add a product and the planner fills all 7 slots automatically.</p>' +
+      '<button data-action="add-product" class="tap w-full bg-stone-900 text-white rounded-xl font-semibold text-[14px] mb-2">+ Add first product</button>' +
+      '<button data-action="seed" class="tap w-full border border-stone-300 rounded-xl font-semibold text-[13px]">Load 2 sample products</button></div>';
+    $('#view-plan').innerHTML = h; return;
+  }
+
+  h += '<div class="h-1.5 bg-stone-200 rounded-full overflow-hidden mb-4"><div class="h-full bg-emerald-500 rounded-full" style="width:' + Math.round(done / 7 * 100) + '%"></div></div>';
+
+  plan.slots.forEach((s, i) => {
+    const p = getProduct(s.productId), v = p ? getVideo(s.productId, s.videoId) : null, dn = DAYS[i];
+    if (!p || !v) {
+      h += '<div class="bg-white border border-dashed border-stone-300 rounded-2xl p-4 mb-3">' +
+        '<div class="text-[12px] font-bold text-stone-500">' + dn[0] + ' · ' + dn[1] + ' <span class="font-normal">' + shortDate(s.date) + '</span></div>' +
+        '<div class="text-[13px] text-stone-500 mt-1">Empty — <button data-action="slot-swap" data-i="' + i + '" class="underline font-semibold">pick a product</button></div></div>';
+      return;
+    }
+    const cap = captionsFor(p)[clamp(s.hookIdx, 0, 2)];
+    const tocAngle = HOOKS[clamp(s.tocIdx, 0, 2)].key;
+    const toc = tocFor(p, v, tocAngle);
+    const n = sceneCount(v.duration), times = sceneTimes(v.duration, n);
+    const repost = (v.timesPosted || 0) > 0, thumb = thumbCache[v.id];
+
+    h += '<div class="bg-white border ' + (s.scheduled ? 'border-emerald-300' : 'border-stone-200') + ' rounded-2xl overflow-hidden mb-3">' +
+      '<div class="flex items-center justify-between px-4 pt-3 pb-2 ' + (s.scheduled ? 'bg-emerald-50' : '') + '">' +
+        '<div class="text-[12px] font-bold text-stone-700">' + dn[0] + ' · ' + dn[1] + ' <span class="font-normal text-stone-400">' + shortDate(s.date) + '</span></div>' +
+        (s.scheduled ? '<span class="text-[11px] font-bold text-emerald-700">✓ SCHEDULED</span>'
+                     : '<button data-action="slot-swap" data-i="' + i + '" class="text-[11px] font-semibold text-stone-500 underline">swap</button>') +
+      '</div>' +
+      '<div class="px-4 pb-3 flex gap-3">' +
+        '<div class="shrink-0 w-[64px] h-[92px] rounded-lg bg-stone-100 border border-stone-200 overflow-hidden flex items-center justify-center" ' +
+          (v.hasFile ? 'data-action="preview-video" data-v="' + v.id + '"' : '') + '>' +
+          (thumb ? '<img src="' + thumb + '" class="w-full h-full object-cover">'
+                 : '<span class="text-[10px] text-stone-400 text-center px-1">' + (v.hasFile ? '▶' : 'no<br>file') + '</span>') + '</div>' +
+        '<div class="min-w-0 flex-1">' +
+          '<div class="font-bold text-[14px] leading-snug truncate">' + esc(p.name) + '</div>' +
+          '<div class="text-[12px] text-stone-500">RM' + esc(p.price || '—') + ' · ' + esc(v.label) + '</div>' +
+          '<div class="text-[11px] text-stone-400">posted ' + (v.timesPosted || 0) + '/10' + (v.lastPosted ? ' · last ' + shortDate(v.lastPosted) : ' · never') + '</div>' +
+          '<div class="mt-2 ' + (repost ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-emerald-50 border-emerald-200 text-emerald-800') + ' border rounded-lg px-2 py-1.5 text-[11px] leading-snug">' +
+            (repost ? '<b>⚠️ Reposting this clip</b> — before scheduling, change the first 1-3 seconds (new hook frame/text), trim slightly differently, or use a different sound. Identical re-uploads get suppressed.'
+                    : '<b>✅ Fresh clip</b> — safe to post as is.') + '</div>' +
+        '</div></div>' +
+
+      /* caption */
+      '<div class="px-4 pb-3">' +
+        '<div class="text-[10.5px] font-bold text-stone-400 uppercase tracking-wide mb-1.5">Caption angle</div>' +
+        '<div class="flex gap-1.5 mb-2">' +
+          HOOKS.map((hk, hi) => '<button data-action="slot-hook" data-i="' + i + '" data-h="' + hi + '" class="flex-1 text-[11px] font-semibold py-2 rounded-lg border ' +
+            (s.hookIdx === hi ? 'bg-stone-900 text-white border-stone-900' : 'bg-white text-stone-600 border-stone-300') + '">' + hk.emoji + ' ' + hk.label + '</button>').join('') + '</div>' +
+        '<div class="cap bg-stone-50 border border-stone-200 rounded-xl p-3 text-[12.5px] leading-relaxed text-stone-800">' + esc(cap.text) + '</div>' +
+        '<div class="flex gap-2 mt-2">' +
+          '<button data-action="copy-cap" data-p="' + p.id + '" data-h="' + s.hookIdx + '" class="tap flex-1 bg-stone-900 text-white rounded-xl text-[13px] font-semibold">Copy caption</button>' +
+          (p.link ? '<button data-action="copy-link" data-p="' + p.id + '" class="tap px-4 border border-stone-300 rounded-xl text-[13px] font-semibold">🔗 Link</button>' : '') +
+        '</div>' +
+      '</div>' +
+
+      /* TOC */
+      '<div class="px-4 pb-3 border-t border-stone-100 pt-3">' +
+        '<div class="flex items-center justify-between mb-1.5">' +
+          '<span class="text-[10.5px] font-bold text-stone-400 uppercase tracking-wide">TOC angle</span>' +
+          '<span class="text-[10.5px] text-stone-400">' + (v.duration ? v.duration + 's' : '~15s assumed') + ' · ' + n + ' scenes · ' + densityLabel(n) + '</span>' +
+        '</div>' +
+        '<div class="flex gap-1.5 mb-2">' +
+          HOOKS.map((hk, hi) => '<button data-action="slot-toc" data-i="' + i + '" data-h="' + hi + '" class="flex-1 text-[11px] font-semibold py-2 rounded-lg border ' +
+            (s.tocIdx === hi ? 'bg-teal-700 text-white border-teal-700' : 'bg-white text-stone-600 border-stone-300') + '">' + hk.label + '</button>').join('') + '</div>' +
+        '<div class="bg-teal-50/60 border border-teal-200 rounded-xl p-3 space-y-1.5">' +
+          toc.map((line, si) => '<div class="flex items-start gap-2">' +
+            '<span class="shrink-0 text-[10px] font-mono text-teal-700 mt-0.5 w-[62px]">' + times[si][0] + '-' + times[si][1] + 's</span>' +
+            '<span class="flex-1 text-[12.5px] leading-snug text-stone-800">' + esc(line) + '</span></div>').join('') +
+        '</div>' +
+        '<button data-action="copy-toc" data-p="' + p.id + '" data-v="' + v.id + '" data-a="' + tocAngle + '" class="tap w-full mt-2 bg-teal-700 text-white rounded-xl text-[13px] font-semibold">Copy all TOC</button>' +
+        (state.tt.connected && v.hasFile
+          ? '<button data-action="tt-upload" data-p="' + p.id + '" data-v="' + v.id + '" class="tap w-full mt-2 border border-stone-900 text-stone-900 rounded-xl text-[13px] font-semibold"' + (state.tt.busy ? ' disabled' : '') + '>⬆ Send clip to TikTok</button>'
+          : '') +
+        (s.scheduled
+          ? '<button data-action="unschedule" data-i="' + i + '" class="tap w-full mt-2 border border-stone-300 rounded-xl text-[12px] font-semibold text-stone-500">Undo scheduled</button>'
+          : '<button data-action="schedule" data-i="' + i + '" class="tap w-full mt-2 bg-emerald-600 text-white rounded-xl text-[13px] font-semibold">✓ Mark slot as scheduled</button>') +
+      '</div></div>';
+  });
+
+  h += '<div class="bg-white border border-stone-200 rounded-2xl p-4 mt-5">' +
+    '<h3 class="font-bold text-[14px] mb-1">Batch Checklist</h3>' +
+    '<p class="text-[11px] text-stone-500 mb-3">Your Sunday routine. Resets each week.</p>' +
+    CHECKLIST.map((c, i) => '<button data-action="check" data-i="' + i + '" class="w-full flex items-start gap-3 text-left py-2.5 border-b border-stone-100 last:border-0">' +
+      '<span class="mt-0.5 shrink-0 w-6 h-6 rounded-md border-2 ' + (plan.checklist[i] ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-stone-300') + ' flex items-center justify-center text-[13px]">' + (plan.checklist[i] ? '✓' : '') + '</span>' +
+      '<span class="text-[13px] leading-snug ' + (plan.checklist[i] ? 'line-through text-stone-400' : 'text-stone-700') + '">' + esc(c) + '</span></button>').join('') +
+    '<p class="mt-3 text-[11px] leading-snug text-stone-500 bg-stone-100 rounded-lg px-3 py-2">ℹ️ Native scheduler needs a <b>Creator or Business account</b> and works from a <b>desktop web browser</b>, up to <b>10 days</b> ahead.</p></div>';
+
+  $('#view-plan').innerHTML = h;
+  hydrateThumbs();
+}
+function hydrateThumbs() {
+  allVideos().forEach(async (x) => {
+    if (!x.v.hasFile || thumbCache[x.v.id] !== undefined) return;
+    const t = await getThumb(x.v.id);
+    if (t) render();
+  });
+}
+
+/* =========================================================================
+   TAB 2 — PERFORMANCE
+   ========================================================================= */
+function renderPerf() {
+  const logs = state.logs.slice();
+  let h = reminderBanner() + ttPanel();
+
+  h += '<div class="grid grid-cols-2 gap-2 mb-2">' +
+    '<button data-action="import-csv" class="tap bg-stone-900 text-white rounded-xl text-[13px] font-semibold px-2">⬆ Import CSV</button>' +
+    '<button data-action="manual-log" class="tap border border-stone-300 bg-white rounded-xl text-[13px] font-semibold px-2">✎ Log manually</button></div>' +
+    '<p class="text-[11px] text-stone-500 mb-4 px-1 leading-snug">Videos settle by day 7 — importing weekly means this data represents ~90% of lifetime views.' +
+    (state.settings.lastImport ? ' Last import: ' + shortDate(state.settings.lastImport) + '.' : '') + '</p>';
+
+  if (!logs.length) {
+    h += '<div class="bg-white border border-stone-200 rounded-2xl p-5 text-center mb-4">' +
+      '<div class="text-[34px] mb-1">📊</div><h3 class="font-bold text-[15px]">No posts logged yet</h3>' +
+      '<p class="text-[13px] text-stone-500 mt-1">Export from TikTok Studio → Analytics → Download data, then import here. Video IDs saved under your products match automatically.</p>' +
+      '<button data-action="sample-csv" class="mt-3 text-[12px] font-semibold underline text-stone-600">Download a sample CSV to test</button></div>';
+  } else {
+    const bh = bestAngle(logs, 'hook'), bt = bestAngle(logs, 'toc');
+    const hStats = angleStats(logs, 'hook');
+    const totalOrders = logs.reduce((a, l) => a + (l.orders || 0), 0);
+    const withEr = logs.filter(l => er(l) != null);
+    h += '<div class="bg-stone-900 text-white rounded-2xl p-4 mb-4">' +
+      '<div class="grid grid-cols-2 gap-3">' +
+        '<div><div class="text-[10px] uppercase tracking-wide text-stone-400 font-semibold">Best hook type</div>' +
+          (bh ? '<div class="text-[16px] font-bold leading-tight">' + hookLabel(bh.key) + '</div><div class="text-[11px] text-stone-300">avg ' + fmt(bh.avgViews) + ' views · ' + bh.n + ' posts</div>'
+              : '<div class="text-[13px] font-semibold">Need more data</div>') + '</div>' +
+        '<div><div class="text-[10px] uppercase tracking-wide text-stone-400 font-semibold">Best TOC angle</div>' +
+          (bt ? '<div class="text-[16px] font-bold leading-tight">' + hookLabel(bt.key) + '</div><div class="text-[11px] text-stone-300">avg ' + fmt(bt.avgViews) + ' views · ' + bt.n + ' posts</div>'
+              : '<div class="text-[13px] font-semibold">Need more data</div>') + '</div>' +
+      '</div>' +
+      '<div class="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-white/10 text-center">' +
+        '<div><div class="text-[16px] font-bold">' + logs.length + '</div><div class="text-[10px] text-stone-400">posts</div></div>' +
+        '<div><div class="text-[16px] font-bold">' + fmt(Math.round(logs.reduce((a, l) => a + (l.views || 0), 0) / logs.length)) + '</div><div class="text-[10px] text-stone-400">avg views</div></div>' +
+        '<div><div class="text-[16px] font-bold">' + (withEr.length ? (withEr.reduce((a, l) => a + er(l), 0) / withEr.length).toFixed(1) + '%' : '—') + '</div><div class="text-[10px] text-stone-400">avg ER</div></div></div>' +
+      (totalOrders > 0 ? '<div class="mt-3 text-[12px] bg-white/10 rounded-lg px-3 py-2">🛒 Orders per post: <b>' + (totalOrders / logs.length).toFixed(2) + '</b> <span class="text-stone-400">(' + totalOrders + ' total)</span></div>' : '') +
+    '</div>';
+
+    if (logs.length >= 5) {
+      const max = Math.max(1, ...HOOKS.map(hk => hStats[hk.key].avgViews));
+      const W = 300, H = 130, bw = 56, gap = 34;
+      let bars = '';
+      HOOKS.forEach((hk, i) => {
+        const st = hStats[hk.key];
+        const bh2 = Math.round((st.avgViews / max) * (H - 24 - 28));
+        const x = 22 + i * (bw + gap), y = H - 26 - bh2;
+        bars += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + Math.max(bh2, 2) + '" rx="5" fill="' + (st.avgViews === max && st.n ? '#0f766e' : '#a8a29e') + '"></rect>' +
+                '<text x="' + (x + bw / 2) + '" y="' + (y - 6) + '" font-size="11" font-weight="700" fill="#1c1917" text-anchor="middle">' + (st.n ? fmt(st.avgViews) : '—') + '</text>' +
+                '<text x="' + (x + bw / 2) + '" y="' + (H - 10) + '" font-size="10" fill="#78716c" text-anchor="middle">' + hk.label + ' (' + st.n + ')</text>';
+      });
+      h += '<div class="bg-white border border-stone-200 rounded-2xl p-4 mb-4"><h3 class="font-bold text-[14px] mb-2">Avg views per hook type</h3>' +
+        '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="150" role="img" aria-label="Average views per hook type">' +
+        '<line x1="12" y1="' + (H - 26) + '" x2="' + (W - 12) + '" y2="' + (H - 26) + '" stroke="#e7e5e4"></line>' + bars + '</svg></div>';
+    }
+
+    h += '<div class="bg-white border border-stone-200 rounded-2xl p-4 mb-4"><h3 class="font-bold text-[14px] mb-2">Per product</h3>' +
+      state.products.map(p => {
+        const pl = logs.filter(l => l.productId === p.id);
+        const b = pl.length >= 3 ? bestAngle(pl, 'hook') : null;
+        const t = pl.length >= 3 ? bestAngle(pl, 'toc') : null;
+        return '<div class="py-2 border-b border-stone-100 last:border-0">' +
+          '<div class="font-semibold text-[13px] truncate">' + esc(p.name) + '</div>' +
+          (pl.length >= 3
+            ? '<div class="text-[12px] text-emerald-700 font-medium">Best hook: ' + (b ? hookLabel(b.key) + ' · avg ' + fmt(b.avgViews) + ' views' : '—') + '</div>' +
+              '<div class="text-[12px] text-teal-700 font-medium">Best TOC angle: ' + (t ? hookLabel(t.key) + ' · avg ' + fmt(t.avgViews) + ' views' : '—') + '</div>'
+            : '<div class="text-[12px] text-stone-400">Need more data (' + pl.length + '/3)</div>') + '</div>';
+      }).join('') + '</div>';
+  }
+
+  const stale = state.products.filter(p => {
+    const last = (p.videos || []).map(v => v.lastPosted).filter(Boolean).sort().pop();
+    const d = last ? daysSince(last) : null;
+    return d == null || d >= 7;
+  });
+  if (state.products.length && stale.length) {
+    h += '<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-4"><h3 class="font-bold text-[13px] text-amber-900 mb-1">⏰ Not posted in 7+ days</h3>' +
+      '<div class="text-[12.5px] text-amber-800 leading-snug">' + stale.map(p => esc(p.name)).join(' · ') + '</div></div>';
+  }
+
+  if (logs.length) {
+    const key = state.sort.key, dir = state.sort.dir === 'asc' ? 1 : -1;
+    logs.sort((a, b) => {
+      if (key === 'views') return ((a.views || 0) - (b.views || 0)) * dir;
+      if (key === 'er') return ((er(a) || 0) - (er(b) || 0)) * dir;
+      if (key === 'product') {
+        const x = (getProduct(a.productId) || {}).name || '', y = (getProduct(b.productId) || {}).name || '';
+        return (x > y ? 1 : x < y ? -1 : 0) * dir;
+      }
+      return ((a.date || '') > (b.date || '') ? 1 : (a.date || '') < (b.date || '') ? -1 : 0) * dir;
+    });
+    const arrow = (k) => key === k ? (state.sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    h += '<div class="bg-white border border-stone-200 rounded-2xl overflow-hidden mb-4">' +
+      '<div class="flex items-center justify-between px-4 pt-3 pb-2"><h3 class="font-bold text-[14px]">All posts (' + logs.length + ')</h3>' +
+      '<button data-action="export-csv" class="text-[11px] font-semibold underline text-stone-600">Export CSV</button></div>' +
+      '<div class="overflow-x-auto no-scrollbar"><table class="w-full text-[12px]"><thead><tr class="text-stone-500 border-y border-stone-100">' +
+        '<th class="text-left font-semibold px-3 py-2 whitespace-nowrap"><button data-action="sort" data-k="date">Date' + arrow('date') + '</button></th>' +
+        '<th class="text-left font-semibold px-2 py-2 whitespace-nowrap"><button data-action="sort" data-k="product">Product' + arrow('product') + '</button></th>' +
+        '<th class="text-left font-semibold px-2 py-2">Hook</th><th class="text-left font-semibold px-2 py-2">TOC</th>' +
+        '<th class="text-right font-semibold px-2 py-2 whitespace-nowrap"><button data-action="sort" data-k="views">Views' + arrow('views') + '</button></th>' +
+        '<th class="text-right font-semibold px-2 py-2">Like%</th>' +
+        '<th class="text-right font-semibold px-2 py-2 whitespace-nowrap"><button data-action="sort" data-k="er">ER%' + arrow('er') + '</button></th>' +
+        '<th class="text-right font-semibold px-3 py-2">Age</th><th></th></tr></thead><tbody>' +
+        logs.map(l => {
+          const p = getProduct(l.productId), e = er(l), k = lr(l), ds = daysSince(l.date);
+          return '<tr class="border-b border-stone-50 last:border-0">' +
+            '<td class="px-3 py-2 whitespace-nowrap">' + shortDate(l.date) + '</td>' +
+            '<td class="px-2 py-2 max-w-[100px] truncate">' + esc(p ? p.name : '—') + '</td>' +
+            '<td class="px-2 py-2 whitespace-nowrap text-stone-500">' + esc(hookLabel(l.hook)) + '</td>' +
+            '<td class="px-2 py-2 whitespace-nowrap text-teal-700">' + esc(l.toc ? hookLabel(l.toc) : '—') + '</td>' +
+            '<td class="px-2 py-2 text-right font-semibold">' + fmt(l.views) + '</td>' +
+            '<td class="px-2 py-2 text-right">' + (k == null ? '—' : k.toFixed(1)) + '</td>' +
+            '<td class="px-2 py-2 text-right font-semibold ' + (e != null && e >= 6 ? 'text-emerald-700' : '') + '">' + (e == null ? '—' : e.toFixed(1)) + '</td>' +
+            '<td class="px-3 py-2 text-right text-stone-400 whitespace-nowrap">' + (ds == null ? '—' : ds + 'd') + '</td>' +
+            '<td class="pr-2"><button data-action="del-log" data-id="' + l.id + '" class="text-stone-300 px-1">✕</button></td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+  }
+
+  h += '<div class="bg-white border border-stone-200 rounded-2xl p-4 mb-2"><h3 class="font-bold text-[14px] mb-3">Data &amp; backup</h3>' +
+    '<button data-action="export-csv" class="tap w-full mb-2 border border-stone-300 rounded-xl text-[13px] font-semibold">⬇ Export performance log (CSV)</button>' +
+    '<button data-action="export-toc" class="tap w-full mb-2 border border-stone-300 rounded-xl text-[13px] font-semibold">⬇ Export all TOC scripts (TXT)</button>' +
+    '<button data-action="sample-csv" class="tap w-full mb-2 border border-stone-300 rounded-xl text-[13px] font-semibold">⬇ Download sample import CSV</button>' +
+    '<button disabled class="tap w-full mb-2 border border-stone-200 rounded-xl text-[12px] font-semibold text-stone-400 bg-stone-50 leading-snug px-2">Auto-sync from TikTok — coming soon<br><span class="font-normal">(needs TikTok Developer app approval)</span></button>' +
+    '<button data-action="reset-logs" class="tap w-full mb-2 border border-amber-300 text-amber-800 rounded-xl text-[13px] font-semibold">Reset performance log only</button>' +
+    '<button data-action="clear-all" class="tap w-full border border-red-300 text-red-700 rounded-xl text-[13px] font-semibold">Clear ALL data</button></div>';
+
+  $('#view-perf').innerHTML = h;
+}
+
+/* =========================================================================
+   TAB 3 — PRODUCTS
+   ========================================================================= */
+function renderProducts() {
+  let h = '<button data-action="add-product" class="tap w-full bg-stone-900 text-white rounded-xl font-semibold text-[14px] mb-4">+ Add product</button>';
+  if (!state.products.length) {
+    h += '<div class="bg-white border border-stone-200 rounded-2xl p-5 text-center">' +
+      '<p class="text-[13px] text-stone-500 mb-3">Nothing here yet. A product holds many clips over time — add clips as you film them.</p>' +
+      '<button data-action="seed" class="tap w-full border border-stone-300 rounded-xl font-semibold text-[13px]">Load 2 sample products</button></div>';
+  }
+
+  state.products.forEach(p => {
+    const sub = state.subtab[p.id] || 'captions';
+    h += '<div class="bg-white border border-stone-200 rounded-2xl p-4 mb-3">' +
+      '<div class="flex items-start justify-between gap-2"><div class="min-w-0">' +
+        '<div class="font-bold text-[15px] leading-snug">' + esc(p.name) + '</div>' +
+        '<div class="text-[12px] text-stone-500">RM' + esc(p.price || '—') + (p.promo ? ' · ' + esc(p.promo) : '') + (p.limited ? ' · <span class="text-amber-700 font-semibold">Limited stock</span>' : '') + '</div></div>' +
+        '<div class="flex gap-1 shrink-0">' +
+          '<button data-action="edit-product" data-p="' + p.id + '" class="w-9 h-9 rounded-lg border border-stone-300 text-[13px]">✎</button>' +
+          '<button data-action="del-product" data-p="' + p.id + '" class="w-9 h-9 rounded-lg border border-stone-300 text-red-600 text-[13px]">🗑</button></div></div>' +
+      (p.desc ? '<p class="text-[12.5px] text-stone-600 mt-2 leading-snug">' + esc(p.desc) + '</p>' : '') +
+      ((p.tags || []).length ? '<div class="flex flex-wrap gap-1 mt-2">' + p.tags.map(t => '<span class="text-[10.5px] bg-stone-100 text-stone-600 rounded-full px-2 py-0.5">' + esc(t) + '</span>').join('') + '</div>' : '') +
+      (p.link ? '<button data-action="copy-link" data-p="' + p.id + '" class="mt-2 text-[11.5px] text-stone-500 underline truncate max-w-full block text-left">🔗 ' + esc(p.link) + '</button>'
+              : '<div class="mt-2 text-[11.5px] text-amber-700">⚠ No yellow-bag link saved</div>') +
+
+      /* videos */
+      '<div class="mt-3 pt-3 border-t border-stone-100">' +
+        '<div class="flex items-center justify-between mb-2"><h4 class="text-[12px] font-bold text-stone-500 uppercase tracking-wide">Videos (' + (p.videos || []).length + ')</h4>' +
+        '<button data-action="add-video" data-p="' + p.id + '" class="text-[12px] font-semibold underline">+ Add video</button></div>' +
+        ((p.videos || []).length ? p.videos.map(v => {
+          const t = thumbCache[v.id], bar = Math.min(100, (v.timesPosted || 0) / 10 * 100), n = sceneCount(v.duration);
+          return '<div class="flex gap-3 py-2 border-b border-stone-50 last:border-0">' +
+            '<div class="shrink-0 w-[48px] h-[68px] rounded-lg bg-stone-100 border border-stone-200 overflow-hidden flex items-center justify-center" ' + (v.hasFile ? 'data-action="preview-video" data-v="' + v.id + '"' : '') + '>' +
+              (t ? '<img src="' + t + '" class="w-full h-full object-cover">' : '<span class="text-[9px] text-stone-400 text-center px-1">' + (v.hasFile ? '▶' : 'no file') + '</span>') + '</div>' +
+            '<div class="min-w-0 flex-1">' +
+              '<div class="flex items-center justify-between gap-2"><div class="font-semibold text-[13px] truncate">' + esc(v.label) + '</div>' +
+                '<button data-action="del-video" data-p="' + p.id + '" data-v="' + v.id + '" class="text-stone-300 text-[13px] px-1">✕</button></div>' +
+              '<div class="text-[11px] ' + ((v.timesPosted || 0) >= 10 ? 'text-red-600 font-semibold' : 'text-stone-500') + '">POSTED ' + (v.timesPosted || 0) + '/10 times</div>' +
+              '<div class="text-[11px] text-stone-400">Last posted: ' + (v.lastPosted ? shortDate(v.lastPosted) : 'never') + ' · ' + (v.duration ? v.duration + 's → ' + n + ' scenes' : 'no duration set') + '</div>' +
+              '<div class="h-1 bg-stone-200 rounded-full mt-1 overflow-hidden"><div class="h-full ' + (bar >= 100 ? 'bg-red-500' : 'bg-stone-700') + '" style="width:' + bar + '%"></div></div>' +
+              '<div class="flex gap-1.5 mt-2">' +
+                '<button data-action="pick-video" data-p="' + p.id + '" data-v="' + v.id + '" class="flex-1 text-[11px] font-semibold py-2 rounded-lg border border-stone-300">' + (v.hasFile ? 'Replace' : 'Upload') + '</button>' +
+                '<button data-action="edit-video" data-p="' + p.id + '" data-v="' + v.id + '" class="flex-1 text-[11px] font-semibold py-2 rounded-lg border border-stone-300">' + (v.tiktokId ? 'ID ✓' : '+ Video ID') + '</button>' +
+              '</div></div></div>';
+        }).join('') : '<p class="text-[12px] text-stone-400 py-2">No clips yet. Add one so the planner can rotate it and track reposts.</p>') +
+      '</div>' +
+
+      /* sub-nav */
+      '<div class="mt-3 pt-3 border-t border-stone-100">' +
+        '<div class="flex bg-stone-200/70 rounded-xl p-1 mb-3">' +
+          '<button data-action="subtab" data-p="' + p.id + '" data-v="captions" class="flex-1 text-[12px] font-semibold py-2 rounded-lg ' + (sub === 'captions' ? 'bg-white shadow-sm' : 'text-stone-500') + '">📝 Captions</button>' +
+          '<button data-action="subtab" data-p="' + p.id + '" data-v="toc" class="flex-1 text-[12px] font-semibold py-2 rounded-lg ' + (sub === 'toc' ? 'bg-white shadow-sm' : 'text-stone-500') + '">🎬 TOC Scripts</button>' +
+        '</div>' +
+        (sub === 'captions' ? captionsPanel(p) : tocPanel(p)) +
+      '</div></div>';
+  });
+
+  $('#view-products').innerHTML = h;
+  hydrateThumbs();
+}
+function captionsPanel(p) {
+  const caps = captionsFor(p);
+  return '<div class="flex items-center justify-between mb-2">' +
+      '<span class="text-[12px] font-bold text-stone-500 uppercase tracking-wide">' + esc(langLabel(state.settings.lang)) + '</span>' +
+      '<button data-action="regen" data-p="' + p.id + '" class="text-[12px] font-semibold underline">↻ Regenerate captions</button></div>' +
+    caps.map((c, i) => '<div class="mb-2">' +
+      '<div class="flex items-center justify-between mb-1">' +
+        '<span class="text-[11px] font-bold text-stone-600">' + HOOKS[i].emoji + ' ' + HOOKS[i].label + ' hook</span>' +
+        '<button data-action="copy-cap" data-p="' + p.id + '" data-h="' + i + '" class="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-stone-900 text-white">Copy</button></div>' +
+      '<div class="cap bg-stone-50 border border-stone-200 rounded-xl p-2.5 text-[12px] leading-relaxed text-stone-700">' + esc(c.text) + '</div></div>').join('');
+}
+function tocPanel(p) {
+  if (!(p.videos || []).length) return '<p class="text-[12px] text-stone-400">Add a clip first — TOC scripts are built from its length.</p>';
+  const angle = state.subtab['a_' + p.id] || 'question';
+  let h = '<div class="flex items-center justify-between mb-2">' +
+      '<span class="text-[12px] font-bold text-stone-500 uppercase tracking-wide">' + esc(langLabel(state.settings.lang)) + '</span>' +
+      '<button data-action="regen-toc" data-p="' + p.id + '" class="text-[12px] font-semibold underline">↻ Regenerate TOC</button></div>' +
+    '<div class="flex gap-1.5 mb-1">' +
+      HOOKS.map(hk => '<button data-action="toc-angle" data-p="' + p.id + '" data-a="' + hk.key + '" class="flex-1 text-[11px] font-semibold py-2 rounded-lg border ' +
+        (angle === hk.key ? 'bg-teal-700 text-white border-teal-700' : 'bg-white text-stone-600 border-stone-300') + '">' + hk.emoji + ' ' + hk.label + '</button>').join('') + '</div>' +
+    '<div class="flex gap-1.5 mb-3">' +
+      LANGS.map(l => '<button data-action="lang" data-v="' + l[0] + '" class="flex-1 text-[10.5px] font-semibold py-1.5 rounded-lg border ' +
+        (state.settings.lang === l[0] ? 'bg-stone-900 text-white border-stone-900' : 'bg-white text-stone-500 border-stone-300') + '">' + l[1] + '</button>').join('') + '</div>';
+
+  p.videos.forEach(v => {
+    const n = sceneCount(v.duration), times = sceneTimes(v.duration, n), lines = tocFor(p, v, angle);
+    const per = ((v.duration || 15) / n).toFixed(1);
+    h += '<div class="border border-stone-200 rounded-xl overflow-hidden mb-3">' +
+      '<div class="bg-stone-50 px-3 py-2 border-b border-stone-200">' +
+        '<div class="font-semibold text-[12.5px] truncate">' + esc(v.label) + '</div>' +
+        '<div class="text-[11px] text-stone-500">' + (v.duration ? 'Your video is ' + v.duration + ' seconds' : 'No duration yet — assuming 15 seconds') +
+          ' — suggesting <b>' + n + ' scenes</b> at ~' + per + ' sec each (' + densityLabel(n) + ' density)' +
+          (v.duration ? '' : ' · <button data-action="edit-video" data-p="' + p.id + '" data-v="' + v.id + '" class="underline font-semibold">set length</button>') + '</div></div>' +
+      '<div class="p-3 space-y-2">' +
+        lines.map((line, si) => '<div class="flex items-start gap-2">' +
+          '<span class="shrink-0 text-[10px] font-mono text-teal-700 mt-1 w-[58px]">' + times[si][0] + '-' + times[si][1] + 's</span>' +
+          '<span class="flex-1 text-[12.5px] leading-snug">' + esc(line) + '</span>' +
+          '<button data-action="copy-scene" data-p="' + p.id + '" data-v="' + v.id + '" data-a="' + angle + '" data-s="' + si + '" class="shrink-0 text-[10.5px] font-semibold px-2 py-1 rounded-md border border-stone-300">Copy</button></div>').join('') +
+        '<button data-action="copy-toc" data-p="' + p.id + '" data-v="' + v.id + '" data-a="' + angle + '" class="tap w-full mt-1 bg-teal-700 text-white rounded-xl text-[12.5px] font-semibold">Copy all TOC</button>' +
+      '</div></div>';
+  });
+  return h;
+}
+
+/* =========================================================================
+   MODALS
+   ========================================================================= */
+const fld = (label, input) => '<div><label class="block text-[12px] font-semibold text-stone-600 mb-1.5">' + label + '</label>' + input + '</div>';
+
+function productForm(pid) {
+  const p = pid ? getProduct(pid) : newProduct(), isNew = !pid, tags = p.tags || [];
+  const custom = tags.filter(t => PRESET_TAGS.indexOf(t) < 0).join(', ');
+  openModal('<div class="flex items-center justify-between mb-3"><h3 class="font-bold text-[16px]">' + (isNew ? 'Add product' : 'Edit product') + '</h3>' +
+    '<button data-action="close-modal" class="w-9 h-9 rounded-lg border border-stone-300">✕</button></div><form id="pform" class="space-y-3">' +
+    fld('Product name', '<input name="name" required value="' + esc(p.name) + '" placeholder="Swiss Thomas Chopper" class="w-full tap px-3 rounded-xl border border-stone-300">') +
+    '<div class="grid grid-cols-2 gap-3">' +
+      fld('Price (RM)', '<input name="price" inputmode="decimal" value="' + esc(p.price) + '" placeholder="25" class="w-full tap px-3 rounded-xl border border-stone-300">') +
+      fld('Promo (optional)', '<input name="promo" value="' + esc(p.promo) + '" placeholder="Diskaun 30%" class="w-full tap px-3 rounded-xl border border-stone-300">') + '</div>' +
+    fld('Yellow-bag link', '<input name="link" value="' + esc(p.link) + '" placeholder="https://vt.tiktok.com/..." class="w-full tap px-3 rounded-xl border border-stone-300">') +
+    fld('Description (2-3 sentences)', '<textarea name="desc" rows="3" placeholder="Chopper manual, tarik tali je. Jimat masa potong bawang." class="w-full p-3 rounded-xl border border-stone-300 text-[14px]">' + esc(p.desc) + '</textarea>') +
+    '<div><label class="block text-[12px] font-semibold text-stone-600 mb-1.5">Benefit tags</label><div class="flex flex-wrap gap-1.5">' +
+      PRESET_TAGS.map(t => '<label class="cursor-pointer"><input type="checkbox" name="tag" value="' + esc(t) + '" class="peer hidden"' + (tags.indexOf(t) >= 0 ? ' checked' : '') + '>' +
+        '<span class="block text-[12px] px-3 py-2 rounded-full border border-stone-300 text-stone-600 peer-checked:bg-stone-900 peer-checked:text-white peer-checked:border-stone-900">' + esc(t) + '</span></label>').join('') +
+      '</div><input name="customTags" value="' + esc(custom) + '" placeholder="Custom tags, comma separated" class="mt-2 w-full tap px-3 rounded-xl border border-stone-300 text-[13px]"></div>' +
+    '<label class="flex items-center justify-between bg-stone-50 border border-stone-200 rounded-xl px-3 py-3"><span class="text-[13px] font-semibold">Limited stock?</span>' +
+      '<input type="checkbox" name="limited" class="w-6 h-6"' + (p.limited ? ' checked' : '') + '></label>' +
+    '<p class="text-[11px] text-stone-500 -mt-1">Off = captions and TOC use social proof instead of urgency. No fake scarcity.</p>' +
+    '<button type="submit" class="tap w-full bg-stone-900 text-white rounded-xl font-semibold text-[14px]">' + (isNew ? 'Add product' : 'Save changes') + '</button></form>');
+  $('#pform').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const chosen = $$('#pform input[name="tag"]:checked').map(i => i.value);
+    const customList = String(f.get('customTags') || '').split(',').map(s => s.trim()).filter(Boolean);
+    const t = pid ? getProduct(pid) : p;
+    t.name = String(f.get('name') || '').trim() || 'Untitled product';
+    t.price = String(f.get('price') || '').trim();
+    t.promo = String(f.get('promo') || '').trim();
+    t.link = String(f.get('link') || '').trim();
+    t.desc = String(f.get('desc') || '').trim();
+    t.tags = chosen.concat(customList);
+    t.limited = !!f.get('limited');
+    t.captionCache = {};
+    (t.videos || []).forEach(v => v.tocCache = {});     // product details feed the TOC too
+    if (isNew) { if (!t.videos.length) t.videos.push(newVideo({ label: 'Clip 1' })); state.products.push(t); }
+    saveAll(); closeModal(); render();
+    toast(isNew ? 'Product added ✓' : 'Saved — captions & TOC refreshed');
+  });
+}
+function videoForm(pid, vid) {
+  const v = getVideo(pid, vid); if (!v) return;
+  openModal('<div class="flex items-center justify-between mb-3"><h3 class="font-bold text-[16px]">Edit clip</h3>' +
+    '<button data-action="close-modal" class="w-9 h-9 rounded-lg border border-stone-300">✕</button></div><form id="vform" class="space-y-3">' +
+    fld('Clip label', '<input name="label" value="' + esc(v.label) + '" class="w-full tap px-3 rounded-xl border border-stone-300">') +
+    fld('Video length (seconds)', '<input name="duration" inputmode="decimal" value="' + (v.duration || '') + '" placeholder="15" class="w-full tap px-3 rounded-xl border border-stone-300">') +
+    '<p class="text-[11px] text-stone-500 -mt-1">Auto-filled when you upload a file. Drives the TOC scene count — 15s gives ' + sceneCount(15) + ' scenes.</p>' +
+    fld('TikTok Video ID (for CSV matching)', '<input name="tiktokId" inputmode="numeric" value="' + esc(v.tiktokId) + '" placeholder="7312345678901234567" class="w-full tap px-3 rounded-xl border border-stone-300">') +
+    '<p class="text-[11px] text-stone-500 -mt-1">From the post URL: tiktok.com/@ultramain/video/<b>7312…</b></p>' +
+    fld('Times posted', '<input name="timesPosted" type="number" min="0" max="99" value="' + (v.timesPosted || 0) + '" class="w-full tap px-3 rounded-xl border border-stone-300">') +
+    '<button type="submit" class="tap w-full bg-stone-900 text-white rounded-xl font-semibold text-[14px]">Save clip</button></form>');
+  $('#vform').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    v.label = String(f.get('label') || '').trim() || v.label;
+    v.tiktokId = String(f.get('tiktokId') || '').trim();
+    v.timesPosted = Math.max(0, Number(f.get('timesPosted')) || 0);
+    const d = num(f.get('duration'));
+    if (d !== v.duration) { v.duration = (d && d > 0) ? d : null; v.tocCache = {}; }
+    saveAll(); closeModal(); render(); toast('Clip saved ✓');
+  });
+}
+function manualLogForm(prefill) {
+  prefill = prefill || {};
+  if (!state.products.length) { toast('Add a product first', 'warn'); return; }
+  // For an unmatched CSV row, guess the product the user most likely means:
+  // the one with a clip that has no Video ID saved yet.
+  let guess = prefill.productId;
+  if (!guess && prefill.csv) {
+    const cand = state.products.find(p => (p.videos || []).some(v => !String(v.tiktokId || '').trim()));
+    guess = (cand || state.products[0]).id;
+  }
+  const opts = state.products.map(p => '<option value="' + p.id + '"' + (guess === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('');
+  const guessName = guess ? (getProduct(guess) || {}).name : '';
+  openModal('<div class="flex items-center justify-between mb-3"><h3 class="font-bold text-[16px]">' + (prefill.csv ? 'Which product is this?' : 'Log a post') + '</h3>' +
+    '<button data-action="close-modal" class="w-9 h-9 rounded-lg border border-stone-300">✕</button></div>' +
+    (prefill.csv ? '<div class="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-[12px] text-amber-900 mb-3">Row <b>' + esc(prefill.tiktokId || '(no id)') + '</b> · ' + fmt(prefill.views) + ' views · ' + shortDate(prefill.date) +
+      ' matched no saved Video ID.' + (guessName ? ' Did you mean <b>' + esc(guessName) + '</b>?' : '') + '</div>' : '') +
+    '<form id="lform" class="space-y-3">' +
+    fld('Product', '<select name="productId" class="w-full tap px-3 rounded-xl border border-stone-300 bg-white">' + opts + '</select>') +
+    '<div class="grid grid-cols-2 gap-3">' +
+      fld('Hook used', '<select name="hook" class="w-full tap px-3 rounded-xl border border-stone-300 bg-white">' +
+        HOOKS.map(hk => '<option value="' + hk.key + '"' + (prefill.hook === hk.key ? ' selected' : '') + '>' + hk.label + '</option>').join('') +
+        '<option value="unknown"' + (!prefill.hook || prefill.hook === 'unknown' ? ' selected' : '') + '>Not sure</option></select>') +
+      fld('TOC angle', '<select name="toc" class="w-full tap px-3 rounded-xl border border-stone-300 bg-white">' +
+        HOOKS.map(hk => '<option value="' + hk.key + '"' + (prefill.toc === hk.key ? ' selected' : '') + '>' + hk.label + '</option>').join('') +
+        '<option value="unknown"' + (!prefill.toc || prefill.toc === 'unknown' ? ' selected' : '') + '>Not sure</option></select>') + '</div>' +
+    fld('Date posted', '<input name="date" type="date" value="' + esc(prefill.date || ymd(new Date())) + '" class="w-full tap px-3 rounded-xl border border-stone-300">') +
+    '<div class="grid grid-cols-2 gap-3">' +
+      fld('Views', '<input name="views" inputmode="numeric" value="' + (prefill.views != null ? prefill.views : '') + '" class="w-full tap px-3 rounded-xl border border-stone-300">') +
+      fld('Likes', '<input name="likes" inputmode="numeric" value="' + (prefill.likes != null ? prefill.likes : '') + '" class="w-full tap px-3 rounded-xl border border-stone-300">') +
+      fld('Comments', '<input name="comments" inputmode="numeric" value="' + (prefill.comments != null ? prefill.comments : '') + '" class="w-full tap px-3 rounded-xl border border-stone-300">') +
+      fld('Shares', '<input name="shares" inputmode="numeric" value="' + (prefill.shares != null ? prefill.shares : '') + '" class="w-full tap px-3 rounded-xl border border-stone-300">') + '</div>' +
+    fld('Orders (optional)', '<input name="orders" inputmode="numeric" value="' + (prefill.orders != null ? prefill.orders : '') + '" class="w-full tap px-3 rounded-xl border border-stone-300">') +
+    '<div class="flex gap-2">' + (prefill.csv ? '<button type="button" data-action="skip-csv-row" class="tap flex-1 border border-stone-300 rounded-xl font-semibold text-[14px]">Skip</button>' : '') +
+      '<button type="submit" class="tap flex-1 bg-stone-900 text-white rounded-xl font-semibold text-[14px]">Save</button></div></form>');
+  $('#lform').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const pid = String(f.get('productId')), p = getProduct(pid);
+    const vidId = prefill.videoId || ((p && p.videos && p.videos[0]) ? p.videos[0].id : null);
+    if (prefill.csv && prefill.tiktokId && vidId) {
+      const v = getVideo(pid, vidId);
+      if (v && !String(v.tiktokId || '').trim()) v.tiktokId = prefill.tiktokId;  // so next week it auto-matches
+    }
+    state.logs.push({
+      id: uid(), productId: pid, videoId: vidId, tiktokId: prefill.tiktokId || '',
+      hook: String(f.get('hook') || 'unknown'), toc: String(f.get('toc') || 'unknown'),
+      date: String(f.get('date') || ymd(new Date())),
+      views: num(f.get('views')) || 0, likes: num(f.get('likes')) || 0,
+      comments: num(f.get('comments')) || 0, shares: num(f.get('shares')) || 0,
+      orders: num(f.get('orders')) || 0, source: prefill.csv ? 'csv' : 'manual'
+    });
+    saveAll(); closeModal();
+    if (prefill.csv) csvQueueNext(); else { render(); toast('Logged ✓'); }
+  });
+}
+function slotSwapForm(i) {
+  const plan = getPlan(currentWeekKey()), list = allVideos();
+  if (!list.length) { toast('Add a product first', 'warn'); return; }
+  openModal('<div class="flex items-center justify-between mb-3"><h3 class="font-bold text-[16px]">' + DAYS[i][0] + ' · pick what to post</h3>' +
+    '<button data-action="close-modal" class="w-9 h-9 rounded-lg border border-stone-300">✕</button></div>' +
+    list.map(x => {
+      const sel = plan.slots[i].productId === x.p.id && plan.slots[i].videoId === x.v.id;
+      return '<button data-action="set-slot" data-i="' + i + '" data-p="' + x.p.id + '" data-v="' + x.v.id + '" class="w-full text-left px-3 py-3 rounded-xl border mb-2 ' + (sel ? 'border-stone-900 bg-stone-50' : 'border-stone-200') + '">' +
+        '<div class="font-semibold text-[13.5px]">' + esc(x.p.name) + '</div>' +
+        '<div class="text-[11.5px] text-stone-500">' + esc(x.v.label) + ' · posted ' + (x.v.timesPosted || 0) + '× · ' + ((x.v.timesPosted || 0) > 0 ? '⚠️ repost' : '✅ fresh') +
+        (x.v.lastPosted ? ' · last ' + shortDate(x.v.lastPosted) : '') + '</div></button>';
+    }).join(''));
+}
+function helpModal() {
+  openModal('<div class="flex items-center justify-between mb-3"><h3 class="font-bold text-[16px]">The Sunday ritual</h3>' +
+    '<button data-action="close-modal" class="w-9 h-9 rounded-lg border border-stone-300">✕</button></div>' +
+    '<div class="text-[13px] leading-relaxed text-stone-700 space-y-3">' +
+      '<p><b>1. Import</b> — export last week\'s analytics from TikTok Studio and import the CSV here. Day-7 data is ~90% of lifetime views, so it\'s worth acting on.</p>' +
+      '<p><b>2. Read</b> — the Performance tab tells you which hook type and which TOC angle actually pulled views.</p>' +
+      '<p><b>3. Plan</b> — the 7 slots fill themselves, favouring clips you haven\'t posted lately and products that performed well last week. Swap anything you don\'t like.</p>' +
+      '<p><b>4. Edit</b> — copy the TOC script per clip and burn the text in CapCut. Reposting a clip? Change the first 1-3 seconds first.</p>' +
+      '<p><b>5. Schedule</b> — desktop tiktok.com → Upload → Schedule. Creator or Business account, up to 10 days ahead. Then mark each slot scheduled here.</p>' +
+      '<hr class="border-stone-200">' +
+      '<p class="text-[12px] text-stone-500">TOC = text on screen. Your best videos are silent, so the on-screen text is the whole message — lines stay short on purpose.</p>' +
+      '<p class="text-[12px] text-stone-500">Everything stays on this device. Export your log to CSV now and then as a backup.</p>' +
+      (idbOK ? '' : '<p class="text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">Video storage is blocked here (usually from opening the file straight off disk). Host the folder to get full offline + install support.</p>') +
+    '</div>');
+}
+
+/* =========================================================================
+   CSV IMPORT
+   ========================================================================= */
+let csvQueue = [], csvImported = 0;
+function handleCSV(text) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) { toast('CSV looks empty', 'err'); return; }
+  const idx = mapHeaders(rows[0]);
+  if (idx.views < 0 && idx.videoId < 0) { toast('Could not find video_id / views columns', 'err'); return; }
+  const parsed = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r], get = (k) => (idx[k] >= 0 ? row[idx[k]] : null);
+    const rec = { tiktokId: String(get('videoId') || '').trim(),
+      views: num(get('views')) || 0, likes: num(get('likes')) || 0, comments: num(get('comments')) || 0,
+      shares: num(get('shares')) || 0, orders: num(get('orders')) || 0,
+      date: parseAnyDate(get('date')) || ymd(new Date()) };
+    if (!rec.tiktokId && !rec.views) continue;
+    parsed.push(rec);
+  }
+  csvImported = 0; csvQueue = [];
+  parsed.forEach(rec => {
+    const match = findByTiktokId(rec.tiktokId);
+    const dupe = state.logs.find(l => l.tiktokId && l.tiktokId === rec.tiktokId && l.date === rec.date);
+    if (dupe) {
+      Object.assign(dupe, { views: rec.views, likes: rec.likes, comments: rec.comments, shares: rec.shares, orders: rec.orders || dupe.orders });
+      csvImported++; return;
+    }
+    if (match) {
+      const hist = historyForDate(match.v, rec.date);
+      state.logs.push({ id: uid(), productId: match.p.id, videoId: match.v.id, tiktokId: rec.tiktokId,
+        hook: (hist && hist.hook) || 'unknown', toc: (hist && hist.toc) || 'unknown',
+        date: rec.date, views: rec.views, likes: rec.likes, comments: rec.comments,
+        shares: rec.shares, orders: rec.orders, source: 'csv' });
+      csvImported++;
+    } else csvQueue.push(rec);
+  });
+  state.settings.lastImport = ymd(new Date());
+  saveAll(); render();
+  if (csvQueue.length) csvQueueNext();
+  else toast('Imported ' + csvImported + ' videos from last week');
+}
+function csvQueueNext() {
+  if (!csvQueue.length) { saveAll(); render(); toast('Imported ' + csvImported + ' videos from last week'); return; }
+  const rec = csvQueue.shift();
+  csvImported++;
+  manualLogForm(Object.assign({ csv: true }, rec));
+}
+
+/* =========================================================================
+   EXPORT / RESET
+   ========================================================================= */
+function download(filename, content, mime) {
+  const blob = new Blob([content], { type: mime || 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+function exportCSV() {
+  if (!state.logs.length) { toast('Nothing to export yet', 'warn'); return; }
+  const head = ['date','product','clip','video_id','hook','toc_angle','views','likes','comments','shares','orders','like_rate_pct','engagement_rate_pct','days_since_posted','source'];
+  const q = (s) => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
+  const lines = [head.join(',')];
+  state.logs.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).forEach(l => {
+    const p = getProduct(l.productId), v = getVideo(l.productId, l.videoId), e = er(l), k = lr(l);
+    lines.push([q(l.date), q(p ? p.name : ''), q(v ? v.label : ''), q(l.tiktokId || ''), q(hookLabel(l.hook)), q(l.toc ? hookLabel(l.toc) : ''),
+      l.views || 0, l.likes || 0, l.comments || 0, l.shares || 0, l.orders || 0,
+      k == null ? '' : k.toFixed(2), e == null ? '' : e.toFixed(2),
+      daysSince(l.date) == null ? '' : daysSince(l.date), q(l.source || '')].join(','));
+  });
+  download('ultramain-performance-' + ymd(new Date()) + '.csv', lines.join('\n'));
+  toast('Exported ✓');
+}
+function exportTOC() {
+  if (!state.products.length) { toast('No products yet', 'warn'); return; }
+  const lang = state.settings.lang, out = ['TOC SCRIPTS — @ultramain', 'Language: ' + langLabel(lang), 'Generated: ' + ymd(new Date()), ''];
+  state.products.forEach(p => {
+    out.push('='.repeat(52), p.name + '  (RM' + priceOf(p) + ')', '='.repeat(52));
+    (p.videos || []).forEach(v => {
+      const n = sceneCount(v.duration);
+      out.push('', '--- ' + v.label + ' · ' + (v.duration ? v.duration + 's' : '~15s assumed') + ' · ' + n + ' scenes ---');
+      HOOKS.forEach(hk => { out.push('', '[' + hk.label + ' angle]'); tocFor(p, v, hk.key).forEach(l => out.push(l)); });
+    });
+    out.push('');
+  });
+  download('ultramain-toc-scripts-' + lang + '-' + ymd(new Date()) + '.txt', out.join('\n'), 'text/plain;charset=utf-8;');
+  toast('TOC scripts exported ✓');
+}
+function sampleCSV() {
+  const ids = [];
+  state.products.forEach(p => (p.videos || []).forEach(v => { if (v.tiktokId) ids.push(v.tiktokId); }));
+  while (ids.length < 7) ids.push('73' + String(Math.floor(Math.random() * 1e15)).padStart(15, '0'));
+  const d = (n) => ymd(new Date(Date.now() - n * DAY_MS));
+  const views = [1219, 840, 465, 2130, 310, 96, 1580], likes = [88, 61, 30, 175, 19, 5, 121];
+  const rows = ['video_id,views,likes,comments,shares,create_date'];
+  for (let i = 0; i < 7; i++) rows.push(ids[i] + ',' + views[i] + ',' + likes[i] + ',' + (i + 2) + ',' + (i * 3 + 4) + ',' + d(7 - i));
+  download('sample-tiktok-analytics.csv', rows.join('\n'));
+  toast('Sample CSV downloaded');
+}
+function seedSamples() {
+  const a = newProduct({ name: 'Swiss Thomas Chopper', price: '25', promo: 'Diskaun 30%',
+    link: 'https://vt.tiktok.com/EXAMPLE-chopper/',
+    desc: 'Chopper manual, tarik tali je terus halus. Bawang, cili, garlic settle dalam 10 saat. Senang cuci, tak payah bersepah.',
+    tags: ['Jimat masa', 'Mudah cuci'], limited: false });
+  a.videos = [newVideo({ label: 'Clip 1 — bawang test', tiktokId: '7301111111111111111', duration: 15, timesPosted: 0, lastPosted: null })];
+  const b = newProduct({ name: 'Rak Dapur Multifungsi', price: '19.90', promo: '',
+    link: 'https://vt.tiktok.com/EXAMPLE-rak/',
+    desc: 'Rak susun dua tingkat untuk singki. Boleh letak span, sabun dan pinggan sekali. Pasang tanpa skru.',
+    tags: ['Multifungsi', 'Portable', 'Sesuai student'], limited: true });
+  const bd = ymd(new Date(Date.now() - 11 * DAY_MS));
+  b.videos = [newVideo({ label: 'Clip 1 — before/after', tiktokId: '7302222222222222222', duration: 12, timesPosted: 2, lastPosted: bd,
+    history: [{ date: bd, hook: 'pov', toc: 'pov', lang: 'bm' }] })];
+  state.products.push(a, b);
+  delete state.plans[currentWeekKey()];
+  saveAll(); render();
+  toast('2 sample products loaded ✓');
+}
+
+/* =========================================================================
+   EVENTS
+   ========================================================================= */
+document.addEventListener('click', async (e) => {
+  const tabBtn = e.target.closest('[data-tab]');
+  if (tabBtn) { switchTab(tabBtn.dataset.tab); return; }
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const a = el.dataset.action, wk = currentWeekKey();
+
+  switch (a) {
+    case 'close-modal': closeModal(); break;
+    case 'open-help': helpModal(); break;
+
+    case 'week': {
+      const cur = new Date(wk + 'T00:00:00');
+      state.settings.week = ymd(new Date(cur.getTime() + Number(el.dataset.d) * 7 * DAY_MS));
+      save(K.settings, state.settings); render(); break;
+    }
+    case 'lang': state.settings.lang = el.dataset.v; save(K.settings, state.settings); render(); break;
+    case 'replan': state.plans[wk] = buildPlan(wk); save(K.plans, state.plans); render(); toast('Week re-planned ✓'); break;
+    case 'slot-hook': {
+      const plan = getPlan(wk), s = plan.slots[+el.dataset.i];
+      s.hookIdx = +el.dataset.h; s.tocIdx = s.hookIdx;   // keep the pair aligned by default
+      save(K.plans, state.plans); render(); break;
+    }
+    case 'slot-toc': { getPlan(wk).slots[+el.dataset.i].tocIdx = +el.dataset.h; save(K.plans, state.plans); render(); break; }
+    case 'slot-swap': slotSwapForm(+el.dataset.i); break;
+    case 'set-slot': {
+      const s = getPlan(wk).slots[+el.dataset.i];
+      s.productId = el.dataset.p; s.videoId = el.dataset.v;
+      save(K.plans, state.plans); closeModal(); render(); break;
+    }
+    case 'check': { const plan = getPlan(wk), i = +el.dataset.i; plan.checklist[i] = !plan.checklist[i]; save(K.plans, state.plans); render(); break; }
+    case 'schedule': {
+      const s = getPlan(wk).slots[+el.dataset.i];
+      const p = getProduct(s.productId), v = getVideo(s.productId, s.videoId);
+      if (!p || !v) { toast('Nothing in this slot', 'warn'); break; }
+      const hook = HOOKS[clamp(s.hookIdx, 0, 2)].key, toc = HOOKS[clamp(s.tocIdx, 0, 2)].key;
+      v.timesPosted = (v.timesPosted || 0) + 1;
+      v.lastPosted = s.date;
+      v.history = v.history || [];
+      v.history.push({ date: s.date, hook: hook, toc: toc, lang: state.settings.lang, at: new Date().toISOString() });
+      s.scheduled = true; s.scheduledAt = new Date().toISOString(); s.hookUsed = hook; s.tocUsed = toc;
+      saveAll(); render();
+      toast('Scheduled · ' + hookLabel(hook) + ' caption + ' + hookLabel(toc) + ' TOC');
+      if (v.timesPosted >= 10) toast('That clip has hit 10 posts — time to refilm it', 'warn');
+      break;
+    }
+    case 'unschedule': {
+      const s = getPlan(wk).slots[+el.dataset.i], v = getVideo(s.productId, s.videoId);
+      if (v) {
+        v.timesPosted = Math.max(0, (v.timesPosted || 0) - 1);
+        v.history = (v.history || []).filter(x => !(x.date === s.date && x.hook === s.hookUsed));
+        v.lastPosted = (v.history || []).map(x => x.date).sort().pop() || null;
+      }
+      s.scheduled = false; s.scheduledAt = null; s.hookUsed = null; s.tocUsed = null;
+      saveAll(); render(); break;
+    }
+
+    case 'copy-cap': { const p = getProduct(el.dataset.p); if (p) copyText(captionsFor(p)[clamp(+el.dataset.h, 0, 2)].text); break; }
+    case 'copy-link': { const p = getProduct(el.dataset.p); if (p && p.link) copyText(p.link); else toast('No link saved', 'warn'); break; }
+    case 'regen': { const p = getProduct(el.dataset.p); if (p) { captionsFor(p, true); render(); toast('New caption options ✓'); } break; }
+    case 'copy-toc': {
+      const p = getProduct(el.dataset.p), v = getVideo(el.dataset.p, el.dataset.v);
+      if (p && v) copyText(tocPlainText(tocFor(p, v, el.dataset.a)));
+      break;
+    }
+    case 'copy-scene': {
+      const p = getProduct(el.dataset.p), v = getVideo(el.dataset.p, el.dataset.v);
+      if (p && v) copyText(tocFor(p, v, el.dataset.a)[+el.dataset.s] || '');
+      break;
+    }
+    case 'regen-toc': {
+      const p = getProduct(el.dataset.p); if (!p) break;
+      (p.videos || []).forEach(v => { v.tocCache = {}; });
+      captionsFor(p, true);                       // hook lines drive the TOC, so refresh both
+      HOOKS.forEach(hk => (p.videos || []).forEach(v => tocFor(p, v, hk.key)));
+      saveAll(); render(); toast('TOC scripts regenerated ✓'); break;
+    }
+    case 'toc-angle': state.subtab['a_' + el.dataset.p] = el.dataset.a; render(); break;
+    case 'subtab': state.subtab[el.dataset.p] = el.dataset.v; render(); break;
+
+    case 'add-product': productForm(null); break;
+    case 'edit-product': productForm(el.dataset.p); break;
+    case 'del-product': {
+      const p = getProduct(el.dataset.p); if (!p) break;
+      if (!confirm('Delete "' + p.name + '" and its clips? Performance rows stay.')) break;
+      (p.videos || []).forEach(v => idbDel(v.id));
+      state.products = state.products.filter(x => x.id !== p.id);
+      Object.keys(state.plans).forEach(k => state.plans[k].slots.forEach(s => { if (s.productId === p.id) { s.productId = null; s.videoId = null; } }));
+      saveAll(); render(); toast('Deleted'); break;
+    }
+    case 'seed': seedSamples(); break;
+    case 'add-video': {
+      const p = getProduct(el.dataset.p); if (!p) break;
+      p.videos.push(newVideo({ label: 'Clip ' + (p.videos.length + 1) }));
+      saveAll(); render(); toast('Clip added — upload the file to auto-detect length'); break;
+    }
+    case 'del-video': {
+      const p = getProduct(el.dataset.p); if (!p) break;
+      if (!confirm('Delete this clip?')) break;
+      idbDel(el.dataset.v);
+      p.videos = p.videos.filter(v => v.id !== el.dataset.v);
+      Object.keys(state.plans).forEach(k => state.plans[k].slots.forEach(s => { if (s.videoId === el.dataset.v) { s.productId = null; s.videoId = null; } }));
+      saveAll(); render(); break;
+    }
+    case 'edit-video': videoForm(el.dataset.p, el.dataset.v); break;
+    case 'pick-video': {
+      const inp = $('#videoPicker'); inp.value = '';
+      inp.onchange = () => { if (inp.files && inp.files[0]) attachFile(el.dataset.p, el.dataset.v, inp.files[0]); };
+      inp.click(); break;
+    }
+    case 'preview-video': {
+      const rec = await idbGet(el.dataset.v);
+      if (!rec || !rec.blob) { toast('No file stored for this clip', 'warn'); break; }
+      const url = URL.createObjectURL(rec.blob);
+      openModal('<div class="flex items-center justify-between mb-3"><h3 class="font-bold text-[15px]">Preview</h3>' +
+        '<button data-action="close-modal" class="w-9 h-9 rounded-lg border border-stone-300">✕</button></div>' +
+        '<video src="' + url + '" controls playsinline class="w-full rounded-xl bg-black"></video>');
+      window.__modalCleanup = () => URL.revokeObjectURL(url);
+      break;
+    }
+
+    case 'import-csv': {
+      const inp = $('#csvPicker'); inp.value = '';
+      inp.onchange = () => {
+        const f = inp.files && inp.files[0]; if (!f) return;
+        const rd = new FileReader();
+        rd.onload = () => handleCSV(String(rd.result));
+        rd.onerror = () => toast('Could not read that file', 'err');
+        rd.readAsText(f);
+      };
+      inp.click(); break;
+    }
+    case 'manual-log': manualLogForm({}); break;
+    case 'tt-sync': ttSync(); break;
+    case 'tt-logout': if (confirm('Disconnect TikTok? Your planning data stays on this device.')) ttLogout(); break;
+    case 'tt-upload': ttUpload(el.dataset.p, el.dataset.v); break;
+    case 'skip-csv-row': csvImported = Math.max(0, csvImported - 1); closeModal(); csvQueueNext(); break;
+    case 'sort': {
+      const k = el.dataset.k;
+      if (state.sort.key === k) state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
+      else { state.sort.key = k; state.sort.dir = 'desc'; }
+      render(); break;
+    }
+    case 'del-log': state.logs = state.logs.filter(l => l.id !== el.dataset.id); saveAll(); render(); break;
+    case 'export-csv': exportCSV(); break;
+    case 'export-toc': exportTOC(); break;
+    case 'sample-csv': sampleCSV(); break;
+    case 'reset-logs': {
+      if (!confirm('Delete every performance row? Products, clips and scripts stay.')) break;
+      state.logs = []; saveAll(); render(); toast('Performance log reset'); break;
+    }
+    case 'clear-all': {
+      if (!confirm('Step 1 of 2 — delete ALL products, clips, videos, scripts, plans and logs?')) break;
+      if (!confirm('Step 2 of 2 — this cannot be undone. Really clear everything?')) break;
+      await idbClear();
+      [K.products, K.logs, K.plans, K.settings].forEach(k => localStorage.removeItem(k));
+      state.products = []; state.logs = []; state.plans = {}; state.subtab = {};
+      state.settings = { lang: 'bm', week: ymd(mondayOf(new Date())), lastImport: null };
+      for (const k in thumbCache) delete thumbCache[k];
+      render(); toast('All data cleared'); break;
+    }
+  }
+});
+$('#modalRoot').addEventListener('click', (e) => { if (e.target.id === 'modalRoot') closeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+/* =========================================================================
+   BOOT
+   ========================================================================= */
+function switchTab(tab) {
+  state.tab = tab;
+  ['plan', 'perf', 'products'].forEach(t => $('#view-' + t).classList.toggle('hidden', t !== tab));
+  $$('.navbtn').forEach(b => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle('text-stone-900', on);
+    b.classList.toggle('text-stone-400', !on);
+  });
+  window.scrollTo({ top: 0 });
+  render();
+}
+function render() {
+  if (state.tab === 'plan') renderPlan();
+  else if (state.tab === 'perf') renderPerf();
+  else renderProducts();
+}
+(async function init() {
+  await openDB();
+  await Promise.all(allVideos().filter(x => x.v.hasFile).map(x => getThumb(x.v.id)));
+  currentWeekKey(); getPlan(currentWeekKey());
+  render();
+
+  // Report back from the TikTok redirect, then tidy the URL so a refresh doesn't re-toast.
+  try {
+    const q = new URLSearchParams(location.search);
+    if (q.get('tt') === 'connected') { toast('TikTok connected ✓'); state.tab = 'perf'; switchTab('perf'); }
+    else if (q.get('tt') === 'error') toast('TikTok: ' + (q.get('reason') || 'connection failed'), 'err');
+    if (q.has('tt')) history.replaceState({}, '', location.pathname);
+  } catch (e) {}
+
+  // Only ask the server about the connection when there's a server to ask.
+  if (location.protocol.startsWith('http')) ttCheck(true);
+})();
+
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; $('#installBtn').classList.remove('hidden'); });
+$('#installBtn').addEventListener('click', async () => {
+  if (!deferredPrompt) { toast('Use your browser menu → Add to Home Screen', 'warn'); return; }
+  deferredPrompt.prompt(); await deferredPrompt.userChoice;
+  deferredPrompt = null; $('#installBtn').classList.add('hidden');
+});
+window.addEventListener('appinstalled', () => $('#installBtn').classList.add('hidden'));
+</script>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('service-worker.js')
+      .then(reg => console.log('SW registered'))
+      .catch(err => console.log('SW failed:', err));
+  }
+</script>
+</body>
+</html>
