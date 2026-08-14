@@ -1,13 +1,6 @@
-# Netlify configuration for Ultramain Batch Planner
-# The site is plain static files in the repo root; the TikTok integration
-# runs as serverless functions under netlify/functions.
+# Functions live at the default location, netlify/functions.
+# No publish key: the site files sit at the repo root, and keeping the
+# functions folder outside the publish dir is what lets Netlify bundle them.
 
 [build]
-  publish = "."
   functions = "netlify/functions"
-
-[[headers]]
-  for = "/*"
-  [headers.values]
-    X-Content-Type-Options = "nosniff"
-    Referrer-Policy = "strict-origin-when-cross-origin"
