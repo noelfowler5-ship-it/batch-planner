@@ -1,0 +1,7 @@
+# Netlify configuration for Ultramain Batch Planner
+# Static site in the repo root; TikTok integration runs as serverless functions.
+
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
