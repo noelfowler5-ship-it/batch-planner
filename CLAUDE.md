@@ -2,6 +2,29 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Two apps live in this repo
+
+1. **Batch Planner** (repo root, `index.html`) — the original weekly TikTok planner,
+   documented below. Live and deployed.
+2. **ClipForge AI** (`clipforge/`) — a separate local-first AI video editor for the same
+   creator: upload a clip, get a Gemini scene plan and score, generate hooks/voiceover/
+   captions, edit, export 9:16. Different product, no shared code. **Read
+   `clipforge/README.md` before touching anything in that folder** — it explains two
+   non-obvious architectural choices (frames are sent to Gemini, never the video file;
+   export uses canvas + MediaRecorder, not ffmpeg.wasm) that look like mistakes otherwise.
+
+Changes to one must not affect the other. `netlify/functions/` holds **both** apps'
+functions: the Batch Planner's six TikTok ones, and ClipForge's three Gemini proxies
+(`gemini-analyze.js`, `gemini-generate.js`, `gemini-models.js`) plus their shared
+`lib/gemini.mjs`. The `lib/` subdirectory is not deployed as a function because it
+contains no entry file matching its own name — keep it that way.
+
+ClipForge has real tests and they are fast; run them after any change in that folder:
+
+```
+cd clipforge && node test/run.cjs && node test/server.mjs
+```
+
 ## What this is
 
 A personal weekly TikTok content planner for one creator (@ultramain, kitchen-gadget
