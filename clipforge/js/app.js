@@ -715,8 +715,11 @@
         if (project && project.aiContent) {
           var hook = (project.aiContent.hooks || []).filter(function (x) { return x.id === el.dataset.hid; })[0];
           if (hook) {
-            var added = CF.editor.addOverlay(project, {
-              text: hook.text, start: 0, end: 2.5, position: 'center', style: 'hook', animation: 'pop', source: 'ai'
+            /* setHookOverlay swaps out any previously-applied hook rather than
+               stacking a second one at the same 0-2.5s spot, so trying a few
+               different hooks on the same clip just works. */
+            var added = CF.editor.setHookOverlay(project, {
+              text: hook.text, start: 0, end: 2.5, position: 'center', animation: 'pop', source: 'ai'
             });
             if (added) {
               project.chosenHookId = hook.id;
@@ -783,37 +786,7 @@
       case 'seg-toggle':
         if (project) {
           if (CF.editor.toggleSegment(project, el.dataset.sid)) commit();
-          else ui.toast('At least one segment has to stay on', 'warn');
-        }
-        break;
-      case 'seg-move':
-        if (project && CF.editor.moveSegment(project, el.dataset.sid, Number(el.dataset.dir))) commit();
-        break;
-      case 'seg-delete':
-        if (project) {
-          if (CF.editor.deleteSegment(project, el.dataset.sid)) commit();
-          else ui.toast('The last segment cannot be deleted', 'warn');
-        }
-        break;
-      case 'seg-split':
-        if (project) CF.studio.splitForm(project, el.dataset.sid);
-        break;
-      case 'seg-split-confirm':
-        if (project) {
-          var at = Number(inputValue('#splitAt'));
-          if (CF.editor.splitSegment(project, el.dataset.sid, at)) {
-            ui.closeModal();
-            commit();
-            ui.toast('Split');
-          } else {
-            ui.toast('Pick a point at least 0.25s from each edge', 'warn');
-          }
-        }
-        break;
-      case 'seg-trim':
-        if (project) {
-          if (CF.editor.trimSegment(project, el.dataset.sid, el.dataset.edge, Number(el.dataset.delta))) commit();
-          else ui.toast('That would make the segment too short', 'warn');
+          else ui.toast('At least one scene has to stay on', 'warn');
         }
         break;
       case 'reset-segments':
@@ -827,32 +800,24 @@
         break;
 
       /* ------------------------------------------------------ overlays */
-      case 'overlay-new':
-        if (project) CF.studio.overlayForm(project, null);
-        break;
-      case 'overlay-edit':
-        if (project) CF.studio.overlayForm(project, el.dataset.oid);
-        break;
-      case 'overlay-save':
-        if (project) saveOverlayForm(project, el.dataset.oid);
-        break;
       case 'overlay-delete':
         if (project && CF.editor.removeOverlay(project, el.dataset.oid)) {
           commit();
           ui.toast('Text removed');
         }
         break;
-      case 'overlay-nudge':
-        if (project) {
-          var delta = Number(el.dataset.delta);
-          var found = project.textOverlays.filter(function (o) { return o.id === el.dataset.oid; })[0];
-          if (found) {
-            CF.editor.updateOverlay(project, found.id, {
-              start: found.start + delta,
-              end: found.end + delta
-            });
-            commit();
-          }
+      case 'confirm-clear-overlays':
+        if (project && project.textOverlays.length) {
+          ui.confirm('Clear all text overlays?',
+            'Every overlay on this project is removed. You can reapply a fresh set from the Plan tab right after, and Undo brings them all back if you change your mind.',
+            'Clear all', 'clear-overlays', {});
+        }
+        break;
+      case 'clear-overlays':
+        if (project && CF.editor.clearOverlays(project)) {
+          ui.closeModal();
+          commit();
+          ui.toast('Text overlays cleared');
         }
         break;
 
@@ -894,37 +859,6 @@
       default:
         break;
     }
-  }
-
-  function saveOverlayForm(project, overlayId) {
-    var text = inputValue('#ovText').trim();
-    if (!text) { ui.toast('Type some text first', 'warn'); return; }
-
-    var start = Number(inputValue('#ovStart'));
-    var end = Number(inputValue('#ovEnd'));
-    var position = inputValue('#ovPos');
-    var style = inputValue('#ovStyle');
-
-    if (!isFinite(start) || !isFinite(end) || end <= start) {
-      ui.toast('The end time has to be after the start time', 'warn');
-      return;
-    }
-
-    var ok;
-    if (overlayId) {
-      ok = CF.editor.updateOverlay(project, overlayId, {
-        text: text, start: start, end: end, position: position, style: style
-      });
-    } else {
-      ok = !!CF.editor.addOverlay(project, {
-        text: text, start: start, end: end, position: position, style: style, animation: 'fade'
-      });
-    }
-
-    if (!ok) { ui.toast('Could not save that overlay', 'err'); return; }
-    ui.closeModal();
-    commit();
-    ui.toast('Text saved', 'ok');
   }
 
   function deleteProject(id) {

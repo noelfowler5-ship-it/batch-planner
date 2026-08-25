@@ -471,37 +471,23 @@
       '<div class="tiny faint">Use if you will record a voiceover over it later.</div></div>' +
       '<button class="switch' + (project.edits.muted ? ' on' : '') + '" data-action="toggle-mute"></button></div>';
 
-    /* segments */
-    h += '<div class="section-label">Segments (' + segs.length + ')</div>';
-    segs.forEach(function (seg, i) {
+    /* segments — a scene is either in the video or out of it, tap to toggle.
+       No trim, split, reorder or delete: they always run in the order the AI
+       found them, which is what makes this a one-tap choice rather than a
+       timing edit. */
+    h += '<div class="section-label">Scenes (' + segs.length + ')</div>';
+    h += '<div class="tiny faint" style="margin:-4px 0 10px">Tap a scene to include or exclude it.</div>';
+    segs.forEach(function (seg) {
       var length = seg.sourceEnd - seg.sourceStart;
-      h += '<div class="card card-tight' + (seg.enabled ? '' : ' disabled-seg') + '">';
+      h += '<div class="card card-tight seg-pick' + (seg.enabled ? '' : ' disabled-seg') +
+           '" data-action="seg-toggle" data-sid="' + U.esc(seg.id) + '">';
       h += '<div class="row-between">';
-      h += '<div class="bold">' + (seg.purpose ? U.esc(PURPOSE_ICON[seg.purpose] || '') + ' ' + U.esc(seg.purpose) : 'Segment ' + (i + 1)) + '</div>';
-      h += '<span class="small mono faint">' + U.esc(U.clock(seg.sourceStart)) + '–' + U.esc(U.clock(seg.sourceEnd)) +
-           ' · ' + U.esc(U.round(length, 1) + 's') + '</span>';
+      h += '<div class="bold">' + (seg.purpose ? U.esc(PURPOSE_ICON[seg.purpose] || '') + ' ' + U.esc(seg.purpose) : 'Clip') + '</div>';
+      h += '<span class="tag" style="' + (seg.enabled ? 'color:var(--good);border-color:rgba(53,192,122,.4)' : '') +
+        '">' + (seg.enabled ? '✓ Included' : 'Excluded') + '</span>';
       h += '</div>';
-
-      h += '<div class="seg-controls">';
-      h += '<button class="btn-xs" data-action="seg-toggle" data-sid="' + U.esc(seg.id) + '">' +
-        (seg.enabled ? '👁 On' : '🚫 Off') + '</button>';
-      h += '<button class="btn-xs" data-action="seg-move" data-sid="' + U.esc(seg.id) + '" data-dir="-1"' +
-        (i === 0 ? ' disabled' : '') + '>↑</button>';
-      h += '<button class="btn-xs" data-action="seg-move" data-sid="' + U.esc(seg.id) + '" data-dir="1"' +
-        (i === segs.length - 1 ? ' disabled' : '') + '>↓</button>';
-      h += '<button class="btn-xs" data-action="seg-split" data-sid="' + U.esc(seg.id) + '">Split</button>';
-      h += '<button class="btn-xs btn-danger" data-action="seg-delete" data-sid="' + U.esc(seg.id) + '"' +
-        (segs.length <= 1 ? ' disabled' : '') + '>Delete</button>';
-      h += '</div>';
-
-      h += '<div class="seg-controls" style="margin-top:6px">';
-      h += '<span class="tiny faint" style="align-self:center">Trim start</span>';
-      h += '<button class="btn-xs" data-action="seg-trim" data-sid="' + U.esc(seg.id) + '" data-edge="start" data-delta="-0.5">−0.5s</button>';
-      h += '<button class="btn-xs" data-action="seg-trim" data-sid="' + U.esc(seg.id) + '" data-edge="start" data-delta="0.5">+0.5s</button>';
-      h += '<span class="tiny faint" style="align-self:center">end</span>';
-      h += '<button class="btn-xs" data-action="seg-trim" data-sid="' + U.esc(seg.id) + '" data-edge="end" data-delta="-0.5">−0.5s</button>';
-      h += '<button class="btn-xs" data-action="seg-trim" data-sid="' + U.esc(seg.id) + '" data-edge="end" data-delta="0.5">+0.5s</button>';
-      h += '</div>';
+      h += '<div class="small muted mono" style="margin-top:4px">' + U.esc(U.clock(seg.sourceStart)) + '–' +
+        U.esc(U.clock(seg.sourceEnd)) + ' · ' + U.esc(U.round(length, 1) + 's') + '</div>';
       h += '</div>';
     });
 
@@ -509,10 +495,12 @@
       h += '<button class="btn-ghost btn-block" style="margin-top:6px" data-action="reset-segments">Reset to the AI\'s cut</button>';
     }
 
-    /* overlays */
+    /* overlays — add or remove only, timing always matches what the AI
+       suggested on the Plan tab. "Clear all" makes it cheap to try a
+       different batch of text on the same clip without deleting one by one. */
     h += '<div class="section-label">Text overlays (' + project.textOverlays.length + ')</div>';
     if (!project.textOverlays.length) {
-      h += '<div class="card"><div class="small muted">None yet. Add one below, or apply the AI\'s suggestions from the Plan tab.</div></div>';
+      h += '<div class="card"><div class="small muted">None yet. Apply the AI\'s suggestions from the Plan tab.</div></div>';
     }
     project.textOverlays.forEach(function (o) {
       h += '<div class="card card-tight">';
@@ -520,15 +508,12 @@
         U.esc(U.clock(o.start)) + '–' + U.esc(U.clock(o.end)) + '</span>' +
         '<span class="tag">' + U.esc(o.position) + ' · ' + U.esc(o.style) + '</span></div>';
       h += '<div style="margin-top:6px">' + U.esc(o.text) + '</div>';
-      h += '<div class="seg-controls" style="margin-top:8px">';
-      h += '<button class="btn-xs" data-action="overlay-edit" data-oid="' + U.esc(o.id) + '">Edit</button>';
-      h += '<button class="btn-xs" data-action="overlay-nudge" data-oid="' + U.esc(o.id) + '" data-delta="-0.5">◀ 0.5s</button>';
-      h += '<button class="btn-xs" data-action="overlay-nudge" data-oid="' + U.esc(o.id) + '" data-delta="0.5">0.5s ▶</button>';
-      h += '<button class="btn-xs btn-danger" data-action="overlay-delete" data-oid="' + U.esc(o.id) + '">Delete</button>';
-      h += '</div>';
+      h += '<button class="btn-xs btn-danger" style="margin-top:8px" data-action="overlay-delete" data-oid="' + U.esc(o.id) + '">Delete</button>';
       h += '</div>';
     });
-    h += '<button class="btn-sm btn-block" data-action="overlay-new">＋ Add text overlay</button>';
+    if (project.textOverlays.length) {
+      h += '<button class="btn-sm btn-block" data-action="confirm-clear-overlays">Clear all overlays</button>';
+    }
 
     h += '<div style="height:16px"></div>';
     h += '<button class="btn-primary btn-block" data-action="studio-tab" data-value="export">Go to export</button>';
@@ -604,66 +589,5 @@
       U.esc(support.isMp4 ? 'MP4 directly' : 'WebM, which can be converted to MP4 afterwards') + '.</div>';
     return h;
   }
-
-  /* -------------------------------------------------------------- overlay form */
-
-  St.overlayForm = function (project, overlayId) {
-    var existing = null;
-    (project.textOverlays || []).forEach(function (o) { if (o.id === overlayId) existing = o; });
-    var outDuration = CF.editor.outputDuration(project);
-
-    var h = '<div class="modal-title">' + (existing ? 'Edit text' : 'Add text overlay') + '</div>';
-    h += '<label class="field"><span>Text (max ' + CF.aiSchema.MAX_OVERLAY_CHARS + ' characters)</span>' +
-      '<input type="text" id="ovText" maxlength="' + CF.aiSchema.MAX_OVERLAY_CHARS + '" value="' +
-      U.esc(existing ? existing.text : '') + '" placeholder="Jimat masa memasak"></label>';
-
-    h += '<div class="row" style="gap:8px">';
-    h += '<label class="field" style="flex:1"><span>Start (s)</span>' +
-      '<input type="number" id="ovStart" step="0.1" min="0" max="' + outDuration + '" value="' +
-      U.esc(existing ? existing.start : 0) + '"></label>';
-    h += '<label class="field" style="flex:1"><span>End (s)</span>' +
-      '<input type="number" id="ovEnd" step="0.1" min="0" max="' + outDuration + '" value="' +
-      U.esc(existing ? existing.end : Math.min(2.5, outDuration)) + '"></label>';
-    h += '</div>';
-
-    h += '<label class="field"><span>Position</span><select id="ovPos">' +
-      CF.aiSchema.POSITIONS.map(function (p) {
-        return '<option value="' + p + '"' + (existing && existing.position === p ? ' selected' : '') + '>' + p + '</option>';
-      }).join('') + '</select></label>';
-
-    h += '<label class="field"><span>Style</span><select id="ovStyle">' +
-      CF.aiSchema.OVERLAY_STYLES.map(function (p) {
-        return '<option value="' + p + '"' + (existing && existing.style === p ? ' selected' : '') + '>' + p + '</option>';
-      }).join('') + '</select></label>';
-
-    h += '<div class="row" style="gap:8px">';
-    h += '<button class="btn-ghost" style="flex:1" data-action="close-modal">Cancel</button>';
-    h += '<button class="btn-primary" style="flex:1" data-action="overlay-save" data-oid="' +
-      U.esc(existing ? existing.id : '') + '">Save</button>';
-    h += '</div>';
-
-    ui.openModal(h);
-  };
-
-  St.splitForm = function (project, segmentId) {
-    var hit = CF.editor.find(project, segmentId);
-    if (!hit) return;
-    var seg = hit.segment;
-    var mid = U.round((seg.sourceStart + seg.sourceEnd) / 2, 1);
-
-    ui.openModal(
-      '<div class="modal-title">Split this segment</div>' +
-      '<div class="small muted" style="margin-bottom:12px">This segment runs ' +
-        U.esc(U.clock(seg.sourceStart)) + ' to ' + U.esc(U.clock(seg.sourceEnd)) +
-        '. Pick where to cut it in two.</div>' +
-      '<label class="field"><span>Split at (seconds into the original clip)</span>' +
-        '<input type="number" id="splitAt" step="0.1" min="' + seg.sourceStart + '" max="' + seg.sourceEnd +
-        '" value="' + mid + '"></label>' +
-      '<div class="row" style="gap:8px">' +
-        '<button class="btn-ghost" style="flex:1" data-action="close-modal">Cancel</button>' +
-        '<button class="btn-primary" style="flex:1" data-action="seg-split-confirm" data-sid="' + U.esc(segmentId) + '">Split</button>' +
-      '</div>'
-    );
-  };
 
 })(window.CF);

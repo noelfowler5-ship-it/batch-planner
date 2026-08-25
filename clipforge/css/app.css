@@ -727,3 +727,13 @@ nav.bottom button.on { color: var(--accent); }
   border-color: var(--good);
   color: var(--good);
 }
+
+/* ---------------------------------------------------------- scene toggle */
+
+.seg-pick {
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+.seg-pick:active {
+  opacity: 0.8;
+}

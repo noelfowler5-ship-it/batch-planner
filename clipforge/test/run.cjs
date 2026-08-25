@@ -306,6 +306,34 @@ CF.editor.addOverlay(e10, { text: 'First', start: 1, end: 5 });
 CF.editor.addOverlay(e10, { text: 'Second', start: 3, end: 7 });
 ok(CF.editor.overlapWarnings(e10).length === 1, 'a clash between two overlays is reported');
 ok(e10.textOverlays.length === 2, 'but neither is deleted behind the users back');
+
+section('editor — clearOverlays: reusing a clip with a different text batch');
+var e11 = demoProject();
+CF.editor.addOverlay(e11, { text: 'Old batch A', start: 1, end: 3 });
+CF.editor.addOverlay(e11, { text: 'Old batch B', start: 10, end: 12 });
+ok(CF.editor.clearOverlays(e11) === true, 'clearing removes everything in one step');
+ok(e11.textOverlays.length === 0, 'the project now has no overlays');
+ok(CF.editor.canUndo(e11) === true, 'clearing is a single undoable step');
+CF.editor.undo(e11);
+ok(e11.textOverlays.length === 2, 'undo brings the whole batch back at once, not one at a time');
+ok(CF.editor.clearOverlays(CF.project.create({ name: 'x', video: { duration: 5 } })) === false,
+   'clearing an already-empty overlay list is a no-op, not a wasted undo step');
+
+section('editor — setHookOverlay: trying different hooks replaces, never stacks (regression)');
+/* Reported bug: tapping "Put on video" on hook A then hook B put both at the
+   same 0-2.5s spot, silently overlapping — the opposite of "reusable". */
+var e12 = demoProject();
+var first = CF.editor.setHookOverlay(e12, { text: 'Hook A text', start: 0, end: 2.5, position: 'center', animation: 'pop' });
+ok(!!first && first.style === 'hook', 'the first hook is applied and tagged as a hook overlay');
+ok(e12.textOverlays.filter(function (o) { return o.style === 'hook'; }).length === 1, 'exactly one hook overlay exists');
+var second = CF.editor.setHookOverlay(e12, { text: 'Hook B text', start: 0, end: 2.5, position: 'center', animation: 'pop' });
+ok(!!second, 'a second hook can be applied');
+ok(e12.textOverlays.filter(function (o) { return o.style === 'hook'; }).length === 1,
+   'trying a different hook REPLACES the first, it does not stack a second overlay at the same spot');
+ok(e12.textOverlays.filter(function (o) { return o.style === 'hook'; })[0].text === 'Hook B text',
+   'the surviving hook overlay is the one just chosen');
+ok(CF.editor.overlapWarnings(e12).length === 0, 'no self-overlap warning from two hooks fighting for the same 2.5s');
+ok(CF.editor.canUndo(e12) === true, 'switching hooks is still undoable as one step');
 `);
 
 /* ============================ export ==================================== */
@@ -463,7 +491,7 @@ ok(!pl.includes('No scene plan yet') && !pl.includes('Analyse first'),
    'plan does not show downstream steps before analysis has run — it stops at the analyse button');
 
 CF.state.studioTab = 'edit'; CF.render();
-ok(html('#view-studio').includes('Segments'), 'edit works even with no analysis');
+ok(html('#view-studio').includes('Scenes'), 'edit works even with no analysis');
 
 section('studio — the Overview/Director/Content merge (regression)');
 /* This used to be 3 separate tabs the user had to switch between for one
@@ -516,11 +544,42 @@ ok(/Scene plan/.test(p2) && p2.indexOf('Scene plan') > p2.indexOf('CONTENT SCORE
    'sections appear in a sensible order: score, then scene plan, then content');
 ok(p2.indexOf('Hooks') > p2.indexOf('Scene plan'), 'content comes after the scene plan, not before it');
 
+/* This project has no applied overlays yet (aiContent.textOverlays are only
+   suggestions until something is actually applied) — apply one so the
+   delete/clear-all assertions below have something real to act on. */
+CF.editor.addOverlay(full, { text: 'Applied test overlay', start: 1, end: 3 });
+
 CF.state.studioTab = 'edit'; CF.render();
 var ed = html('#view-studio');
 ok(ed.includes('Undo'), 'undo is offered');
-ok(ed.includes('Split'), 'split is offered');
-ok(ed.includes('Add text overlay'), 'overlays can be added by hand');
+
+section('edit — scenes are tap-to-toggle only, no manual timing controls (per user request)');
+/* The Edit tab used to expose per-second trim, split-into-two, reorder and a
+   full manual overlay-editing form. Reported as too complicated: the ask was
+   a pure "choose which scenes are in" workflow with the AI's own timing, plus
+   add/remove-only text overlays. */
+ok(ed.includes('Tap a scene to include or exclude it'), 'the simplified choose-in/out instruction is shown');
+ok(ed.includes('✓ Included') && ed.includes('Excluded'), 'each scene shows a plain in/out state');
+ok((ed.match(/data-action="seg-toggle"/g) || []).length === full.edits.segments.length,
+   'every scene is a single toggle target, one per scene');
+ok(!ed.includes('Split'), 'the split-a-scene control is gone');
+ok(!/data-action="seg-move"/.test(ed), 'scene reordering is gone — order always matches the AI\\'s plan');
+ok(!/data-action="seg-trim"/.test(ed), 'manual per-second trim buttons are gone');
+ok(!/data-action="seg-delete"/.test(ed), 'scene deletion is gone — toggling off already excludes it');
+ok(!ed.includes('Add text overlay'), 'typing a custom text overlay is no longer offered');
+ok(!/data-action="overlay-edit"/.test(ed) && !/data-action="overlay-nudge"/.test(ed),
+   'overlay timing can no longer be hand-edited or nudged');
+ok(/data-action="overlay-delete"/.test(ed), 'deleting a single unwanted overlay is still possible');
+ok(ed.includes('Clear all overlays'), 'a bulk "clear all" action exists for trying a different text batch on the same clip');
+
+section('edit — no overlays yet: no stray Clear-all button');
+var bareEdit = CF.project.create({ name: 'NoOverlays', video: { duration: 9 } });
+CF.editor.ensureSegments(bareEdit);
+CF.state.studioProject = bareEdit;
+CF.render();
+ok(!html('#view-studio').includes('Clear all overlays'), 'Clear all is hidden when there is nothing to clear');
+CF.state.studioProject = full;
+CF.render();
 
 CF.state.studioTab = 'export'; CF.render();
 ok(html('#view-studio').includes('cannot export'), 'export is honest about this browser being unable');
@@ -549,13 +608,8 @@ ok(html('#view-projects').includes('92/100'), 'a scored project shows its score'
 ok(html('#view-projects').includes('EXCELLENT'), 'and its verdict band');
 
 section('forms');
-CF.studio.overlayForm(full, null);
-ok(html('#modalRoot').includes('Add text overlay'), 'the overlay form opens');
-ok(!/undefined|NaN/.test(html('#modalRoot')), 'the overlay form has no leaked placeholders');
-CF.ui.closeModal();
-CF.studio.splitForm(full, full.edits.segments[0].id);
-ok(html('#modalRoot').includes('Split this segment'), 'the split form opens');
-CF.ui.closeModal();
+ok(typeof CF.studio.overlayForm === 'undefined' && typeof CF.studio.splitForm === 'undefined',
+   'the manual overlay-edit and scene-split forms are gone, not just unreachable');
 CF.screens.renameForm(full);
 ok(html('#modalRoot').includes('Rename project'), 'the rename form opens');
 CF.ui.closeModal();

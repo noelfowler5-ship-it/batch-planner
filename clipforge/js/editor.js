@@ -316,6 +316,36 @@
     return project.textOverlays.length !== before;
   };
 
+  /* Wipe every overlay in one step. Exists so the same clip can be tried with
+     a different batch of AI-suggested text without deleting the old ones one
+     at a time first — clear, then reapply from the Plan tab. */
+  E.clearOverlays = function (project) {
+    if (!project.textOverlays.length) return false;
+    E.mark(project);
+    project.textOverlays = [];
+    return true;
+  };
+
+  /* A hook is a single choice, not a growing list — tapping "Put on video" on
+     a second hook should replace the first attempt at the start of the clip,
+     not stack a second overlay on top of it at the same 0-2.5s spot. Inlines
+     addOverlay's clamping rather than calling it, so the remove+add reads as
+     one undo step instead of two. */
+  E.setHookOverlay = function (project, fields) {
+    var outDuration = E.outputDuration(project);
+    var overlay = E.newOverlay(fields);
+    overlay.style = 'hook';
+    overlay.start = U.clamp(overlay.start, 0, Math.max(0, outDuration - 0.4));
+    overlay.end = U.clamp(overlay.end, overlay.start + 0.4, outDuration || overlay.start + 0.4);
+    if (!overlay.text) return null;
+
+    E.mark(project);
+    project.textOverlays = project.textOverlays.filter(function (o) { return o.style !== 'hook'; });
+    project.textOverlays.push(overlay);
+    E.sortOverlays(project);
+    return overlay;
+  };
+
   E.updateOverlay = function (project, overlayId, changes) {
     var found = null;
     project.textOverlays.forEach(function (o) { if (o.id === overlayId) found = o; });
