@@ -4,7 +4,8 @@ A local-first AI video editor for one faceless Malaysian TikTok affiliate creato
 
 > RAW VIDEO → AI DIRECTOR → QUICK EDIT → EXPORT
 
-Not a CapCut competitor. The goal is to turn a raw kitchen-gadget clip into a
+Not a CapCut competitor. The goal is to turn a raw affiliate-product clip —
+kitchen gadgets, skincare, fashion, whatever the creator sells — into a
 publish-ready 9:16 TikTok in a 3–10 minute session.
 
 **Status: all phases built.** Upload → AI analysis → content generation →

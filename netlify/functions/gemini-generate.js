@@ -12,18 +12,21 @@ import { guard, json, fail, readJsonBody, resolveModel, callGemini } from './lib
 
 export const PROMPT_VERSION = 1;
 
+/* GOOD/BAD lines below are tone references, not templates — they show the
+   register (casual, direct) to write in, not the product to write about.
+   Two different niches per language so the model doesn't anchor on one. */
 const LANGUAGE_RULES = {
   bm: `Write in casual Malaysian Bahasa Melayu — the way a real person talks on TikTok, not corporate Malay.
-GOOD: "Kalau selalu masak, benda ni memang memudahkan."
+GOOD: "Kalau selalu masak, benda ni memang memudahkan." / "Kulit berminyak memang leceh, tapi benda ni tolong banyak."
 BAD:  "Produk ini amat sesuai bagi individu yang kerap menyediakan makanan."`,
   mix: `Write in casual Malaysian BM mixed naturally with English, the way Malaysians actually speak online.
-GOOD: "Kalau kau selalu potong bawang, this thing save you so much time."
+GOOD: "Kalau kau selalu potong bawang, this thing save you so much time." / "Kalau kau kaki gym, this actually helps a lot."
 Keep it natural — do not translate every phrase twice.`,
   en: `Write in casual conversational English aimed at a Malaysian audience. Friendly and direct, never corporate.
-GOOD: "If you cook most nights, this saves you a real amount of time."`
+GOOD: "If you cook most nights, this saves you a real amount of time." / "If your skin gets oily by noon, this actually helps."`
 };
 
-const SYSTEM = `You write short-form video copy for a faceless Malaysian TikTok affiliate creator in the kitchen-gadget niche.
+const SYSTEM = `You write short-form video copy for a faceless Malaysian TikTok affiliate creator. The product niche varies by project — kitchen gadgets, skincare, fashion, phone accessories, fitness gear, whatever the scene analysis below actually describes — so match the language and details to that specific product, never to a fixed category.
 
 Hard rules:
 - Only describe what the supplied scene analysis actually shows. Never invent product features, results, brands, testimonials or prices. If no price is given, never mention one.
