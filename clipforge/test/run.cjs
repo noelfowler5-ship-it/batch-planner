@@ -454,46 +454,55 @@ section('studio — before analysis');
 var sp = CF.state.projects[0];
 CF.state.studioProject = sp;
 CF.state.tab = 'studio';
-CF.state.studioTab = 'overview'; CF.render();
-var ov = html('#view-studio');
-ok(ov.includes('Not analysed yet'), 'overview is honest that nothing has run yet');
-ok(ov.includes('still frames'), 'the privacy disclosure appears before any analysis');
-ok(ov.includes('Analyse this clip'), 'the analyse action is offered');
+CF.state.studioTab = 'plan'; CF.render();
+var pl = html('#view-studio');
+ok(pl.includes('Not analysed yet'), 'plan is honest that nothing has run yet');
+ok(pl.includes('still frames'), 'the privacy disclosure appears before any analysis');
+ok(pl.includes('Analyse this clip'), 'the analyse action is offered');
+ok(!pl.includes('No scene plan yet') && !pl.includes('Analyse first'),
+   'plan does not show downstream steps before analysis has run — it stops at the analyse button');
 
-CF.state.studioTab = 'director'; CF.render();
-ok(html('#view-studio').includes('No scene plan yet'), 'director tells you to analyse first');
-CF.state.studioTab = 'content'; CF.render();
-ok(html('#view-studio').includes('Analyse first'), 'content tells you to analyse first');
 CF.state.studioTab = 'edit'; CF.render();
 ok(html('#view-studio').includes('Segments'), 'edit works even with no analysis');
 
-section('studio — with a full AI result');
+section('studio — the Overview/Director/Content merge (regression)');
+/* This used to be 3 separate tabs the user had to switch between for one
+   continuous flow, which was reported as confusing. They are now one
+   scrolling "Plan" tab — assert the old 5-tab structure is actually gone,
+   not just renamed. */
+ok(CF.studio.TABS.length === 3, 'the studio now has exactly 3 tabs, not 5');
+ok(CF.studio.TABS.map(function (t) { return t[0]; }).join(',') === 'plan,edit,export',
+   'the tabs are Plan, Edit, Export in that order');
+var subtabsHtml = html('#view-studio');
+ok(!subtabsHtml.includes('data-value="director"') && !subtabsHtml.includes('data-value="content"') &&
+   !subtabsHtml.includes('data-value="overview"'),
+   'no button anywhere still targets the old overview/director/content tab names');
+
+section('studio — with a full AI result, everything on one scroll');
 var full = demoProject();
 full.id = sp.id;
 full.name = 'Chopper demo';
 CF.state.studioProject = full;
 
-CF.state.studioTab = 'overview'; CF.render();
-var o2 = html('#view-studio');
-ok(o2.includes('80'), 'the score is shown');
-ok(o2.includes('WORTH EDITING'), 'the verdict band is shown');
-ok(o2.includes('not a prediction of views'), 'the score is explicitly advisory, not a virality claim');
-ok(o2.includes('Face detected'), 'the face warning fires for the flagged scene');
-ok(o2.includes('CTA potential'), 'the score breakdown is listed');
-ok(o2.includes('Rename') && o2.includes('Delete'), 'project management lives on the overview');
-
-CF.state.studioTab = 'director'; CF.render();
-var d2 = html('#view-studio');
-ok(d2.includes('DEMO'), 'scenes are listed by purpose');
-ok(d2.includes('Apply all safe suggestions'), 'apply-all is offered');
-ok(d2.includes('Masukkan bawang macam ni'), 'the matching voiceover line is shown against its scene');
-ok(d2.includes('Switch it off'), 'the REMOVE scene offers a one-tap cut');
-
-CF.state.studioTab = 'content'; CF.render();
-var c2 = html('#view-studio');
-ok(c2.includes('Kenapa baru tahu?'), 'hooks are listed');
-ok(c2.includes('Put on video'), 'a hook can be applied, not just read');
-ok(c2.includes('Benda kecil'), 'captions are listed');
+CF.state.studioTab = 'plan'; CF.render();
+var p2 = html('#view-studio');
+ok(p2.includes('80'), 'the score is shown');
+ok(p2.includes('WORTH EDITING'), 'the verdict band is shown');
+ok(p2.includes('not a prediction of views'), 'the score is explicitly advisory, not a virality claim');
+ok(p2.includes('Face detected'), 'the face warning fires for the flagged scene');
+ok(p2.includes('CTA potential'), 'the score breakdown is listed');
+ok(p2.includes('DEMO'), 'the scene plan appears on the SAME page as the score, no tab switch needed');
+ok(p2.includes('Apply all safe suggestions'), 'apply-all is offered right there too');
+ok(p2.includes('Masukkan bawang macam ni'), 'the matching voiceover line is shown against its scene');
+ok(p2.includes('Switch it off'), 'the REMOVE scene offers a one-tap cut');
+ok(p2.includes('Kenapa baru tahu?'), 'hooks appear on the same page, further down — still no tab switch');
+ok(p2.includes('Put on video'), 'a hook can be applied, not just read');
+ok(p2.includes('Benda kecil'), 'captions appear on the same page too');
+ok(p2.includes('Rename') && p2.includes('Delete'), 'project management lives on the Plan tab');
+ok(p2.includes('Continue to Edit'), 'a single button nudges toward Edit once planning is done');
+ok(/Scene plan/.test(p2) && p2.indexOf('Scene plan') > p2.indexOf('CONTENT SCORE'),
+   'sections appear in a sensible order: score, then scene plan, then content');
+ok(p2.indexOf('Hooks') > p2.indexOf('Scene plan'), 'content comes after the scene plan, not before it');
 
 CF.state.studioTab = 'edit'; CF.render();
 var ed = html('#view-studio');
@@ -505,7 +514,7 @@ CF.state.studioTab = 'export'; CF.render();
 ok(html('#view-studio').includes('cannot export'), 'export is honest about this browser being unable');
 
 section('studio — no leaked placeholders on any tab');
-['overview','director','content','edit','export'].forEach(function (t) {
+['plan','edit','export'].forEach(function (t) {
   CF.state.studioTab = t; CF.render();
   var markup = html('#view-studio');
   ok(!/undefined|NaN/.test(markup), 'studio/' + t + ' renders with no undefined/NaN');

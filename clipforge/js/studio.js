@@ -1,6 +1,15 @@
 /* studio.js — the per-project workspace.
 
-   Five sub-screens over one project: Overview, Director, Content, Edit, Export.
+   Three tabs over one project: Plan, Edit, Export.
+
+   Plan used to be three separate tabs (Overview / Director / Content) for
+   what is really one continuous idea — analyse, see the scene-by-scene plan,
+   generate the words, apply them — so it is one scrolling page instead: each
+   step appears right below the previous one as soon as it is ready, with no
+   tab-switching in between. Edit (manual timeline control) and Export
+   (rendering) stay separate because they are genuinely different modes, not
+   steps in the same flow.
+
    Every AI suggestion here is paired with an action that actually applies it —
    a recommendation you have to retype by hand is a chatbot, not an editor. */
 
@@ -13,9 +22,7 @@
   CF.studio = St;
 
   St.TABS = [
-    ['overview', 'Overview'],
-    ['director', 'Director'],
-    ['content', 'Content'],
+    ['plan', 'Plan'],
     ['edit', 'Edit'],
     ['export', 'Export']
   ];
@@ -43,7 +50,7 @@
       return;
     }
 
-    var tab = CF.state.studioTab || 'overview';
+    var tab = CF.state.studioTab || 'plan';
     var h = '';
 
     h += '<div class="row-between" style="margin-bottom:10px">';
@@ -57,17 +64,12 @@
     h += '<div class="subtabs">';
     St.TABS.forEach(function (t) {
       var on = t[0] === tab ? ' on' : '';
-      var badge = '';
-      if (t[0] === 'director' && project.aiAnalysis) badge = ' •';
-      if (t[0] === 'content' && project.aiContent) badge = ' •';
       h += '<button class="subtab' + on + '" data-action="studio-tab" data-value="' + t[0] + '">' +
-           U.esc(t[1]) + badge + '</button>';
+           U.esc(t[1]) + '</button>';
     });
     h += '</div>';
 
-    if (tab === 'overview') h += renderOverview(project) + renderManage(project);
-    else if (tab === 'director') h += renderDirector(project);
-    else if (tab === 'content') h += renderContent(project);
+    if (tab === 'plan') h += renderPlan(project) + renderManage(project);
     else if (tab === 'edit') h += renderEdit(project);
     else h += renderExport(project);
 
@@ -103,9 +105,12 @@
     return ui.note(U.esc(reason), 'warn') + '<div style="height:12px"></div>';
   }
 
-  /* --------------------------------------------------------------- overview */
+  /* ------------------------------------------------------------------ plan */
 
-  function renderOverview(project) {
+  /* One continuous scroll: score → scene plan → generated content. Each
+     section only appears once the step before it is ready, so the page reads
+     as a guided sequence rather than a wall of everything at once. */
+  function renderPlan(project) {
     var st = CF.state;
     var h = '';
 
@@ -127,8 +132,30 @@
       return h;
     }
 
+    h += renderScore(project);
+    h += renderScenePlan(project);
+    h += renderContentSection(project);
+
+    h += '<div style="height:6px"></div>';
+    h += '<button class="btn-primary btn-block" data-action="studio-tab" data-value="edit">Continue to Edit</button>';
+    return h;
+  }
+
+  function analysisStepsNote() {
+    return '<ul class="steps">' +
+      '<li class="done">✓ Reading the frames</li>' +
+      '<li class="active">● Detecting scenes and the hook</li>' +
+      '<li>○ Scoring the clip</li>' +
+      '<li>○ Building the edit plan</li>' +
+    '</ul>';
+  }
+
+  /* --------------------------------------------------------------- score */
+
+  function renderScore(project) {
     var a = project.aiAnalysis;
     var verdict = CF.aiSchema.verdictFor(a.score.overall);
+    var h = '';
 
     h += '<div class="card" style="text-align:center">';
     h += '<div class="tiny faint" style="letter-spacing:.1em">CONTENT SCORE</div>';
@@ -171,33 +198,19 @@
       h += '<div style="height:12px"></div>';
     }
 
-    h += '<button class="btn-primary btn-block" data-action="studio-tab" data-value="director">See the scene plan</button>';
-    h += '<div style="height:8px"></div>';
     h += '<button class="btn-ghost btn-block" data-action="reanalyze"' +
          (CF.ai.blockedReason() ? ' disabled' : '') + '>Re-analyse (uses quota)</button>';
     h += '<div class="tiny faint" style="margin-top:8px">Results are cached, so reopening this project costs nothing.</div>';
     return h;
   }
 
-  function analysisStepsNote() {
-    return '<ul class="steps">' +
-      '<li class="done">✓ Reading the frames</li>' +
-      '<li class="active">● Detecting scenes and the hook</li>' +
-      '<li>○ Scoring the clip</li>' +
-      '<li>○ Building the edit plan</li>' +
-    '</ul>';
-  }
+  /* ----------------------------------------------------------- scene plan */
 
-  /* --------------------------------------------------------------- director */
-
-  function renderDirector(project) {
-    if (!project.aiAnalysis) {
-      return ui.empty('🎬', 'No scene plan yet', 'Run the analysis on the Overview tab first.');
-    }
-
+  function renderScenePlan(project) {
     var h = '';
     var scenes = project.aiAnalysis.scenes;
 
+    h += '<div class="section-label">Scene plan</div>';
     h += '<div class="row" style="gap:8px;margin-bottom:12px">';
     h += '<button class="btn-sm btn-primary" style="flex:1" data-action="apply-all">Apply all safe suggestions</button>';
     h += '</div>';
@@ -255,7 +268,7 @@
     });
 
     if (!project.aiContent) {
-      h += ui.note('Voiceover lines and on-screen text appear here once you generate content on the <b>Content</b> tab.', 'info');
+      h += ui.note('Voiceover lines and on-screen text appear right below once you generate content.', 'info');
     }
 
     return h;
@@ -283,26 +296,22 @@
     return hit;
   }
 
-  /* ---------------------------------------------------------------- content */
+  /* -------------------------------------------------------------- content */
 
-  function renderContent(project) {
+  function renderContentSection(project) {
     var st = CF.state;
-
-    if (st.aiBusy.active && st.aiBusy.kind === 'generate') {
-      return busyBar(st.aiBusy.label, st.aiBusy.fraction);
-    }
-
-    if (!project.aiAnalysis) {
-      return ui.empty('✍️', 'Analyse first', 'Content is written from the scene plan, so the analysis has to run first.');
-    }
-
     var h = '';
 
+    if (st.aiBusy.active && st.aiBusy.kind === 'generate') {
+      return '<div class="section-label">Hooks, captions &amp; voiceover</div>' + busyBar(st.aiBusy.label, st.aiBusy.fraction);
+    }
+
     if (!project.aiContent) {
+      h += '<div class="section-label">Hooks, captions &amp; voiceover</div>';
       h += aiBlockedNote();
       h += '<div class="card">';
       h += '<div class="bold" style="margin-bottom:6px">Write the words</div>';
-      h += '<div class="small muted">5 hooks, 3 captions, three voiceover lengths and timed on-screen text — all built from the scene plan, in your chosen language.</div>';
+      h += '<div class="small muted">5 hooks, 3 captions, three voiceover lengths and timed on-screen text — all built from the scene plan above, in your chosen language.</div>';
       h += '</div>';
       h += '<div class="section-label">Language</div>';
       h += ui.chipRow('set-project-language', CF.LANGUAGES, project.language);
@@ -487,7 +496,7 @@
     /* overlays */
     h += '<div class="section-label">Text overlays (' + project.textOverlays.length + ')</div>';
     if (!project.textOverlays.length) {
-      h += '<div class="card"><div class="small muted">None yet. Add one below, or apply the AI\'s suggestions from the Content tab.</div></div>';
+      h += '<div class="card"><div class="small muted">None yet. Add one below, or apply the AI\'s suggestions from the Plan tab.</div></div>';
     }
     project.textOverlays.forEach(function (o) {
       h += '<div class="card card-tight">';

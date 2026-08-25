@@ -20,7 +20,7 @@
 
     /* studio */
     studioProject: null,
-    studioTab: 'overview',
+    studioTab: 'plan',
     studioVoiceover: 'medium',
 
     /* long-running work */
@@ -250,7 +250,7 @@
     var project = findProject(id);
     if (!project) { ui.toast('Project not found', 'err'); return; }
     state.studioProject = project;
-    state.studioTab = 'overview';
+    state.studioTab = 'plan';
     state.exportResult = null;
     switchTab('studio');
   }
