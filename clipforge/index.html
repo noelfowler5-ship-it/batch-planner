@@ -32,6 +32,8 @@
   <section id="view-projects" class="wrap hidden"></section>
   <section id="view-queue"    class="wrap hidden"></section>
   <section id="view-settings" class="wrap hidden"></section>
+  <!-- The per-project workspace. Reached by opening a project, not from the nav. -->
+  <section id="view-studio"   class="wrap hidden"></section>
 </main>
 
 <nav class="bottom">
@@ -54,8 +56,13 @@
 <script src="js/db.js"></script>
 <script src="js/video-engine.js"></script>
 <script src="js/project.js"></script>
+<script src="js/ai-schema.js"></script>
+<script src="js/ai-client.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/export.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/screens.js"></script>
+<script src="js/studio.js"></script>
 <script src="js/app.js"></script>
 <script>
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {

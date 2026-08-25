@@ -50,17 +50,50 @@
   /* ------------------------------------------------------------------ tabs */
 
   ui.TABS = ['create', 'projects', 'queue', 'settings'];
+  /* 'studio' is a real view but not a nav destination — it is opened from a
+     project card and closed back to wherever you came from. */
+  ui.VIEWS = ['create', 'projects', 'queue', 'settings', 'studio'];
 
   ui.showTab = function (tab) {
-    ui.TABS.forEach(function (t) {
+    ui.VIEWS.forEach(function (t) {
       var view = ui.$('#view-' + t);
       if (view) view.classList.toggle('hidden', t !== tab);
     });
     var btns = document.querySelectorAll('.navbtn');
     for (var i = 0; i < btns.length; i++) {
-      btns[i].classList.toggle('on', btns[i].dataset.tab === tab);
+      /* Studio keeps the Projects tab lit, since that is where it came from. */
+      var highlight = tab === 'studio' ? 'projects' : tab;
+      btns[i].classList.toggle('on', btns[i].dataset.tab === highlight);
     }
     try { window.scrollTo({ top: 0 }); } catch (e) { /* not in every environment */ }
+  };
+
+  /* Clipboard with a fallback for browsers that refuse the async API. */
+  ui.copy = function (text) {
+    var done = function () { ui.toast('Copied', 'ok'); };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () { legacy(); });
+        return;
+      }
+    } catch (e) { /* fall through */ }
+    legacy();
+
+    function legacy() {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        done();
+      } catch (e2) {
+        ui.toast('Could not copy — select the text and copy manually', 'warn');
+      }
+    }
   };
 
   ui.setHtml = function (tab, html) {
@@ -110,18 +143,6 @@
       '<div class="big">' + U.esc(icon) + '</div>' +
       '<div class="bold">' + U.esc(title) + '</div>' +
       (sub ? '<div class="small" style="margin-top:6px">' + U.esc(sub) + '</div>' : '') +
-    '</div>';
-  };
-
-  /* An honest placeholder. The spec forbids buttons that pretend to work, so
-     unbuilt features say plainly which phase they arrive in. */
-  ui.comingSoon = function (title, phase, detail) {
-    return '<div class="card">' +
-      '<div class="row-between">' +
-        '<div class="bold">' + U.esc(title) + '</div>' +
-        '<span class="tag">Phase ' + U.esc(phase) + '</span>' +
-      '</div>' +
-      '<div class="small muted" style="margin-top:6px">' + U.esc(detail) + '</div>' +
     '</div>';
   };
 

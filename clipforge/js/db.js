@@ -14,15 +14,17 @@
   'use strict';
 
   var DB_NAME = 'clipforge';
-  var DB_VERSION = 1;
+  var DB_VERSION = 2;
   var STORE_PROJECTS = 'projects';
   var STORE_VIDEOS = 'videos';
+  var STORE_AI = 'aicache';
   var LS_PROJECTS = 'cf_projects';
   var LS_SETTINGS = 'cf_settings';
 
   var idb = null;            /* live IDBDatabase, or null when degraded */
   var memVideos = {};        /* fallback video store: id -> record */
   var memProjects = null;    /* fallback project cache, mirrored to localStorage */
+  var memAi = {};            /* fallback AI cache: key -> record */
 
   var db = {
     ready: false,
@@ -37,8 +39,9 @@
     language: CF.DEFAULT_LANGUAGE,
     timeBudget: CF.DEFAULT_TIME_BUDGET,
     faceFree: true,
-    aiModel: '',              /* chosen in Phase 2; empty = server default */
-    lastTab: 'create'
+    aiModel: '',              /* empty = whatever the server defaults to */
+    lastTab: 'create',
+    projectSort: 'recent'     /* 'recent' | 'score' */
   };
 
   db.loadSettings = function () {
@@ -91,6 +94,7 @@
         var d = ev.target.result;
         if (!d.objectStoreNames.contains(STORE_PROJECTS)) d.createObjectStore(STORE_PROJECTS, { keyPath: 'id' });
         if (!d.objectStoreNames.contains(STORE_VIDEOS)) d.createObjectStore(STORE_VIDEOS, { keyPath: 'id' });
+        if (!d.objectStoreNames.contains(STORE_AI)) d.createObjectStore(STORE_AI, { keyPath: 'key' });
       };
       req.onsuccess = function () { finish({ ok: true, db: req.result }); };
       req.onerror = function () {
@@ -236,6 +240,35 @@
     });
   };
 
+  /* -------------------------------------------------------------- AI cache */
+
+  /* Keyed on fingerprint + prompt version + model + kind, so the same clip is
+     never sent to Gemini twice for the same question. This is what keeps the
+     app inside a free-tier quota. */
+
+  db.getAi = function (key) {
+    if (idb) return wrap(tx(STORE_AI, 'readonly').get(key)).then(function (r) { return r || null; });
+    return Promise.resolve(memAi[key] || null);
+  };
+
+  db.putAi = function (record) {
+    record.storedAt = new Date().toISOString();
+    if (idb) return wrap(tx(STORE_AI, 'readwrite').put(record)).then(function () { return record; });
+    memAi[record.key] = record;
+    return Promise.resolve(record);
+  };
+
+  db.deleteAi = function (key) {
+    if (idb) return wrap(tx(STORE_AI, 'readwrite').delete(key));
+    delete memAi[key];
+    return Promise.resolve();
+  };
+
+  db.countAi = function () {
+    if (idb) return wrap(tx(STORE_AI, 'readonly').getAllKeys()).then(function (k) { return (k || []).length; });
+    return Promise.resolve(Object.keys(memAi).length);
+  };
+
   /* ----------------------------------------------------------------- misc */
 
   db.estimate = function () {
@@ -252,9 +285,11 @@
     if (idb) {
       work.push(wrap(tx(STORE_PROJECTS, 'readwrite').clear()));
       work.push(wrap(tx(STORE_VIDEOS, 'readwrite').clear()));
+      work.push(wrap(tx(STORE_AI, 'readwrite').clear()));
     } else {
       memVideos = {};
       memProjects = {};
+      memAi = {};
       try { localStorage.removeItem(LS_PROJECTS); } catch (e) {}
     }
     return Promise.all(work);

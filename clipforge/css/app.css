@@ -522,3 +522,190 @@ nav.bottom button.on { color: var(--accent); }
 .toast.err { border-color: rgba(229, 84, 75, 0.5); color: #ffb3ae; }
 .toast.warn { border-color: rgba(232, 177, 58, 0.5); color: #f0d79b; }
 .toast.ok { border-color: rgba(53, 192, 122, 0.5); color: #a7e8c6; }
+
+/* ------------------------------------------------------ studio: sub-tabs */
+
+.subtabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  margin: 0 0 18px;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+.subtabs::-webkit-scrollbar { height: 0; }
+.subtab {
+  flex: none;
+  min-height: 38px;
+  padding: 0 13px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.subtab.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(255, 92, 57, 0.1);
+}
+
+/* ---------------------------------------------------------- score display */
+
+.score-big {
+  font-size: 58px;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  margin-top: 4px;
+}
+.score-out { font-size: 20px; color: var(--faint); font-weight: 700; }
+
+.meter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+}
+.meter-row > span:first-child { flex: none; width: 108px; }
+.meter {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.meter > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.structure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.struct-step {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.struct-arrow { color: var(--faint); font-size: 12px; }
+
+/* ------------------------------------------------------ AI suggestion box */
+
+.suggest {
+  margin-top: 10px;
+  padding: 10px 11px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+}
+.suggest-cut { border-left-color: var(--bad); }
+.suggest-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--faint);
+  margin-bottom: 5px;
+}
+
+.card.picked { border-color: var(--good); }
+
+.vo-line {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+  font-size: 14px;
+}
+.vo-line:first-of-type { border-top: none; }
+.vo-line > span:first-child { flex: none; width: 42px; padding-top: 2px; }
+
+/* ---------------------------------------------------------------- timeline */
+
+.timeline {
+  display: flex;
+  gap: 2px;
+  height: 42px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  position: relative;
+}
+.tl-seg {
+  min-width: 8px;
+  background: linear-gradient(180deg, #2f2f38, #232329);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.tl-seg span {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  white-space: nowrap;
+  padding: 0 3px;
+}
+.tl-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--faint);
+}
+.timeline.tl-overlays {
+  height: 12px;
+  margin-top: 4px;
+  display: block;
+}
+.tl-ov {
+  position: absolute;
+  top: 2px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.seg-controls {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.card.disabled-seg { opacity: 0.5; }
+.card.disabled-seg .bold { text-decoration: line-through; }
+
+/* -------------------------------------------------------------- batch rows */
+
+.batch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border);
+}
+.batch-row:first-of-type { border-top: none; }
+.batch-score {
+  flex: none;
+  width: 44px;
+  text-align: right;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}

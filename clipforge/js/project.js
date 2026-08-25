@@ -39,15 +39,27 @@
       /* Populated by later phases. Present from the start so the shape of a
          stored project never changes underneath older records. */
       aiAnalysis: null,
+      aiContent: null,
+      aiModel: null,
       score: null,
       scenes: [],
-      edits: [],
+
+      /* Edits are instructions against the untouched source video, never a
+         re-encode of it (spec §25/§40) — so everything stays reversible. */
+      edits: P.emptyEdits(),
+
       textOverlays: [],
       voiceovers: [],
       captions: [],
+      chosenHookId: null,
+      chosenVoiceover: null,
 
       status: 'RAW'
     };
+  };
+
+  P.emptyEdits = function () {
+    return { segments: [], crop: '9:16', muted: false };
   };
 
   /* Fill in anything a project saved by an earlier version is missing, so an
@@ -69,9 +81,20 @@
       name: (p.video && p.video.name) || ''
     };
     if (CF.STATUSES.indexOf(out.status) < 0) out.status = 'RAW';
-    ['scenes', 'edits', 'textOverlays', 'voiceovers', 'captions'].forEach(function (k) {
+    ['scenes', 'textOverlays', 'voiceovers', 'captions'].forEach(function (k) {
       if (!Array.isArray(out[k])) out[k] = [];
     });
+
+    /* `edits` was an array in the first release and is an object now. Migrate
+       rather than discard, so a project saved before the editor existed still
+       opens cleanly. */
+    if (!out.edits || typeof out.edits !== 'object' || Array.isArray(out.edits)) {
+      out.edits = P.emptyEdits();
+    }
+    if (!Array.isArray(out.edits.segments)) out.edits.segments = [];
+    if (out.edits.crop !== '9:16' && out.edits.crop !== 'none') out.edits.crop = '9:16';
+    out.edits.muted = out.edits.muted === true;
+
     return out;
   };
 

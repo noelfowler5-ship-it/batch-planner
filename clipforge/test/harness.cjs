@@ -18,8 +18,13 @@ const SCRIPTS = [
   'js/db.js',
   'js/video-engine.js',
   'js/project.js',
+  'js/ai-schema.js',
+  'js/ai-client.js',
+  'js/editor.js',
+  'js/export.js',
   'js/ui.js',
   'js/screens.js',
+  'js/studio.js',
   'js/app.js'
 ];
 
@@ -95,6 +100,10 @@ function boot(rootDir, opts) {
     File: class {},
     requestAnimationFrame: (f) => setTimeout(f, 0),
     matchMedia: () => ({ matches: false, addEventListener() {} }),
+    fetch: () => Promise.reject(new Error('offline in harness')),
+    AbortController: class { constructor() { this.signal = {}; } abort() {} },
+    // MediaRecorder deliberately absent: exercises the "this browser cannot
+    // export" path, which is the one users on odd browsers will actually hit.
     // indexedDB deliberately left undefined: this drives the app down its
     // degraded-storage fallback, which is exactly what Chrome does on file://.
     // Assert that path works before assuming the happy one does.

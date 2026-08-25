@@ -4,7 +4,7 @@
    deletes every other cache, which is what forces an installed app to pick up
    the new version instead of serving the old one forever. */
 
-const CACHE_NAME = 'clipforge-v1';
+const CACHE_NAME = 'clipforge-v2';
 
 const FILES_TO_CACHE = [
   './',
@@ -15,8 +15,13 @@ const FILES_TO_CACHE = [
   './js/db.js',
   './js/video-engine.js',
   './js/project.js',
+  './js/ai-schema.js',
+  './js/ai-client.js',
+  './js/editor.js',
+  './js/export.js',
   './js/ui.js',
   './js/screens.js',
+  './js/studio.js',
   './js/app.js'
 ];
 

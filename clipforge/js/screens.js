@@ -159,12 +159,71 @@
       return;
     }
 
-    st.projects.forEach(function (p) {
-      h += projectCard(p);
-    });
+    h += renderBatchPanel(st);
 
+    var sort = st.settings.projectSort || 'recent';
+    var scored = st.projects.filter(function (p) { return typeof p.score === 'number'; });
+
+    if (scored.length > 1) {
+      h += ui.chipRow('sort-projects', [['recent', 'Newest'], ['score', 'Best score']], sort);
+      h += '<div style="height:12px"></div>';
+    }
+
+    var list = st.projects.slice();
+    if (sort === 'score') {
+      list.sort(function (a, b) {
+        var as = typeof a.score === 'number' ? a.score : -1;
+        var bs = typeof b.score === 'number' ? b.score : -1;
+        return bs - as;
+      });
+    }
+
+    list.forEach(function (p) { h += projectCard(p); });
     ui.setHtml('projects', h);
   };
+
+  /* Batch mode: score several clips in one run so the best use of a short
+     editing session is obvious before any editing starts. */
+  function renderBatchPanel(st) {
+    if (st.batch.active) {
+      var pct = st.batch.total
+        ? U.clamp(Math.round(st.batch.done / st.batch.total * 100), 3, 99)
+        : 5;
+      return '<div class="card">' +
+        '<div class="bold" style="margin-bottom:8px">Analysing ' + (st.batch.done + 1) +
+          ' of ' + st.batch.total + '</div>' +
+        '<div class="bar"><i style="width:' + pct + '%"></i></div>' +
+        '<div class="tiny faint" style="margin-top:8px">' + U.esc(st.batch.label || '') + '</div>' +
+        '<button class="btn-sm btn-block" style="margin-top:10px" data-action="cancel-batch">Stop after this one</button>' +
+      '</div>';
+    }
+
+    var pending = st.projects.filter(function (p) {
+      return !p.aiAnalysis && p.videoId && p.frameCount;
+    });
+    if (pending.length < 2) return '';
+
+    var blocked = CF.ai.blockedReason();
+    var h = '<div class="card">';
+    h += '<div class="bold">' + pending.length + ' clips not scored yet</div>';
+    h += '<div class="small muted" style="margin-top:4px">' +
+      'Score them all, then work on the highest one first.</div>';
+    h += '<button class="btn-sm btn-block" style="margin-top:10px" data-action="run-batch"' +
+      (blocked ? ' disabled' : '') + '>Analyse all ' + pending.length + '</button>';
+    if (blocked) {
+      h += '<div class="tiny faint" style="margin-top:8px">' + U.esc(blocked) + '</div>';
+    } else {
+      h += '<div class="tiny faint" style="margin-top:8px">Runs one at a time and uses your Gemini quota.</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function scoreColor(score) {
+    if (score >= 90 || score >= 75) return 'good';
+    if (score >= 60) return 'warn';
+    return 'bad';
+  }
 
   function projectCard(p) {
     var next = CF.project.nextAction(p);
@@ -176,7 +235,12 @@
       U.esc(p.name) + '</div>' + ui.statusTag(p.status) + '</div>';
     h += '<div class="small muted mono" style="margin-top:3px">' + U.esc(CF.project.summaryLine(p)) + '</div>';
     h += '<div class="tiny faint" style="margin-top:3px">Added ' + U.esc(U.relativeDay(p.createdAt)) + '</div>';
-    if (next) {
+
+    if (typeof p.score === 'number') {
+      var verdict = CF.aiSchema.verdictFor(p.score);
+      h += '<div class="tiny" style="margin-top:6px;color:var(--' + scoreColor(p.score) + ')">' +
+        '<b>' + p.score + '/100</b> · ' + U.esc(verdict.label) + '</div>';
+    } else if (next) {
       h += '<div class="tiny" style="margin-top:6px;color:var(--' +
         (next.tone === 'accent' ? 'accent' : next.tone === 'bad' ? 'bad' : next.tone === 'warn' ? 'warn' : 'faint') +
         ')">' + U.esc(next.label) + '</div>';
@@ -269,9 +333,8 @@
          '<span class="small mono bold" id="storageUsed">…</span></div>';
     h += '</div>';
 
-    h += '<div class="section-label">AI</div>';
-    h += ui.comingSoon('Gemini analysis', '2',
-      'Model selection reads the live list from Google, so a renamed model will not break the app. The API key stays in a Netlify environment variable and never reaches the browser.');
+    h += '<div class="section-label">AI model</div>';
+    h += renderModelPicker(CF.state);
 
     h += '<div class="section-label">Danger zone</div>';
     h += '<button class="btn-danger btn-block" data-action="confirm-clear-all">Delete all projects and videos</button>';
@@ -285,54 +348,60 @@
       if (!el) return;
       el.textContent = est && est.usage ? U.bytes(est.usage) : 'unknown';
     });
+    CF.db.countAi().then(function (n) {
+      var el = ui.$('#aiCacheCount');
+      if (el) el.textContent = String(n);
+    });
   };
 
-  /* ======================================================== PROJECT MODAL */
+  /* The model list is fetched live from Google rather than hardcoded, so a
+     renamed or retired model never bricks the app. */
+  function renderModelPicker(st) {
+    var current = st.settings.aiModel || '';
+    var h = '<div class="card">';
 
-  S.openProjectModal = function (project, videoMeta, blobUrl) {
-    var p = project;
-    var h = '';
+    h += '<div class="row-between"><span class="small muted">In use</span>' +
+      '<span class="small mono bold">' + U.esc(current || 'server default') + '</span></div>';
+    h += '<div class="row-between" style="margin-top:8px"><span class="small muted">Saved AI results</span>' +
+      '<span class="small mono bold" id="aiCacheCount">…</span></div>';
+    h += '<div class="tiny faint" style="margin-top:8px">' +
+      'Cached results are reused instead of calling Gemini again — that is what keeps this inside a free quota.</div>';
 
-    h += '<div class="row-between" style="margin-bottom:12px">';
-    h += '<div class="modal-title" style="margin:0">' + U.esc(p.name) + '</div>';
-    h += '<button class="btn-xs" data-action="close-modal">Close</button>';
-    h += '</div>';
+    var blocked = CF.ai.blockedReason();
+    if (blocked) {
+      h += '<div style="height:10px"></div>';
+      h += ui.note(U.esc(blocked), 'warn');
+      h += '</div>';
+      return h;
+    }
 
-    if (blobUrl) {
-      h += '<div class="video-shell"><video src="' + U.esc(blobUrl) + '" controls playsinline preload="metadata"></video></div>';
+    if (st.models === 'loading') {
+      h += '<div class="tiny faint" style="margin-top:12px">Loading the model list…</div>';
+    } else if (Array.isArray(st.models)) {
+      h += '<div style="height:12px"></div>';
+      h += '<label class="field" style="margin-bottom:0"><span>Available to your API key</span>' +
+        '<select id="modelSelect" onchange="void 0">' +
+        '<option value="__default__">Server default</option>' +
+        st.models.map(function (m) {
+          return '<option value="' + U.esc(m.id) + '"' + (m.id === current ? ' selected' : '') + '>' +
+            U.esc(m.label) + '</option>';
+        }).join('') +
+      '</select></label>';
+      h += '<div class="chips" style="margin-top:10px">';
+      h += '<button class="chip" data-action="set-model" data-value="__default__">Use default</button>';
+      st.models.slice(0, 3).forEach(function (m) {
+        h += '<button class="chip' + (m.id === current ? ' on' : '') + '" data-action="set-model" data-value="' +
+          U.esc(m.id) + '">' + U.esc(m.id.replace(/^gemini-/, '')) + '</button>';
+      });
+      h += '</div>';
     } else {
-      h += ui.note('The video file for this project is not available in this browser session. ' +
-        'The project record is intact, but the footage needs re-adding.', 'warn');
+      h += '<button class="btn-sm btn-block" style="margin-top:12px" data-action="load-models">' +
+        'Show models my key can use</button>';
     }
 
-    h += '<div class="row-between" style="margin-top:12px">';
-    h += '<span class="small muted mono">' + U.esc(CF.project.summaryLine(p)) + '</span>';
-    h += '<span id="modalStatusTag">' + ui.statusTag(p.status) + '</span>';
     h += '</div>';
-
-    h += '<div class="section-label">Stage</div>';
-    h += ui.chipRow('set-status', CF.STATUSES.map(function (s) { return [s, CF.STATUS_LABEL[s]]; }), p.status);
-
-    if (videoMeta && videoMeta.frames && videoMeta.frames.length) {
-      h += '<div class="section-label">Frames for AI (' + videoMeta.frames.length + ')</div>';
-      h += ui.filmstrip(videoMeta.frames);
-      h += '<div class="tiny faint" style="margin-top:6px">' +
-        U.esc(U.bytes(CF.video.framesBytes(videoMeta.frames))) + ' total.</div>';
-    }
-
-    h += '<div class="section-label">Next steps</div>';
-    h += ui.comingSoon('AI Director', '2', 'Scene breakdown, hook detection, score and verdict.');
-    h += ui.comingSoon('Editor', '4', 'Trim, split, reorder, text overlays, undo and redo.');
-    h += ui.comingSoon('Export', '5', '1080×1920 · 9:16 · H.264, rendered in the browser.');
-
-    h += '<div class="section-label">Manage</div>';
-    h += '<div class="row" style="gap:8px">';
-    h += '<button class="btn-sm" style="flex:1" data-action="rename-project" data-id="' + U.esc(p.id) + '">Rename</button>';
-    h += '<button class="btn-sm btn-danger" style="flex:1" data-action="confirm-delete-project" data-id="' + U.esc(p.id) + '">Delete</button>';
-    h += '</div>';
-
-    ui.openModal(h);
-  };
+    return h;
+  }
 
   S.renameForm = function (project) {
     ui.openModal(
