@@ -95,6 +95,9 @@
     }
     if (status === 413) return 'That request was too large. Try a shorter clip.';
     if (status === 503) return 'The server has no Gemini API key configured yet.';
+    if (status === 504 || status === 502) {
+      return 'The AI took too long to answer and the connection timed out — this is not an error with your key or your clip. Try a faster model (one with "flash" in the name, not a heavier one), or a shorter clip.';
+    }
     return 'The server returned an error (' + status + ').';
   }
 
