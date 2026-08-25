@@ -12,8 +12,11 @@ const API_ROOT = 'https://generativelanguage.googleapis.com/v1beta';
 /* Changing the default here changes it for every function at once. It can also
    be overridden per-deploy with the GEMINI_MODEL environment variable, and
    per-request by the client (Settings reads the live model list from Google,
-   so a renamed or retired model never bricks the app). */
-export const DEFAULT_MODEL = 'gemini-2.5-flash';
+   so a renamed or retired model never bricks the app).
+
+   gemini-2.5-flash was retired for new API keys — Google's own error message
+   points at gemini-3.6-flash as its replacement, so that's the default now. */
+export const DEFAULT_MODEL = 'gemini-3.6-flash';
 
 /* Request bodies are capped well under Netlify's synchronous function limit.
    The client sends still frames rather than video precisely to stay here. */
