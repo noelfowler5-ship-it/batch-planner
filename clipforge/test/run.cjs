@@ -495,6 +495,18 @@ ok(p2.includes('DEMO'), 'the scene plan appears on the SAME page as the score, n
 ok(p2.includes('Apply all safe suggestions'), 'apply-all is offered right there too');
 ok(p2.includes('Masukkan bawang macam ni'), 'the matching voiceover line is shown against its scene');
 ok(p2.includes('Switch it off'), 'the REMOVE scene offers a one-tap cut');
+
+section('studio — a scene\\'s own text/VO recommendation is never silently dropped (regression)');
+/* In the fixture, scene s1 (0-5s, HOOK) is flagged textRecommended:true, but
+   the only generated overlay (o1, 6-9s) does not overlap it at all. Before
+   the fix, the UI only ever showed a recommendation indirectly — via a
+   matched overlay/voiceover line — so this scene showed no sign the AI had
+   recommended text for it whatsoever. */
+ok(p2.includes('📝 Text recommended'), 'the analysis\\'s own textRecommended flag is now always visible as a tag');
+ok(p2.includes('🎙 VO recommended'), 'the analysis\\'s own voiceoverRecommended flag is now always visible as a tag');
+ok(p2.includes('line up with this exact moment'),
+   'scene 1 (text recommended, no overlapping overlay) gets an explanation instead of silence');
+ok(p2.includes('Jimat masa'), 'meanwhile scene 2, which DOES have a matching voiceover line, still shows the normal suggestion box');
 ok(p2.includes('Kenapa baru tahu?'), 'hooks appear on the same page, further down — still no tab switch');
 ok(p2.includes('Put on video'), 'a hook can be applied, not just read');
 ok(p2.includes('Benda kecil'), 'captions appear on the same page too');

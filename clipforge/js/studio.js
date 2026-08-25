@@ -234,6 +234,14 @@
       h += '<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">';
       h += '<span class="tag">Strength ' + scene.visualStrength + '/10</span>';
       h += '<span class="tag">' + U.esc(scene.editingRecommendation) + '</span>';
+      /* These two flags come straight from the analysis and used to be
+         invisible in the UI — shown only indirectly, and only once a
+         matching generated overlay/voiceover line happened to exist with
+         overlapping timing. If generation gave that moment slightly
+         different timing, the AI's own recommendation vanished with no
+         trace. Show it plainly regardless of whether a match was found. */
+      if (scene.textRecommended) h += '<span class="tag">📝 Text recommended</span>';
+      if (scene.voiceoverRecommended) h += '<span class="tag">🎙 VO recommended</span>';
       if (scene.faceDetected) h += '<span class="tag" style="color:var(--warn);border-color:rgba(232,177,58,.4)">⚠ Face</span>';
       h += '</div>';
 
@@ -246,6 +254,10 @@
           '<div class="small">' + U.esc(vo.text) + '</div>' +
           '<button class="btn-xs" style="margin-top:8px" data-action="copy-text" data-copy="' + U.esc(vo.text) + '">Copy</button>' +
         '</div>';
+      } else if (scene.voiceoverRecommended && content) {
+        h += '<div style="margin-top:10px">' + ui.note(
+          'The AI recommended a voiceover line here, but the generated script doesn\'t line up with this exact moment. Check the full script below, or regenerate content.',
+          'warn') + '</div>';
       }
 
       if (overlay) {
@@ -255,6 +267,10 @@
           '<button class="btn-xs" style="margin-top:8px" data-action="apply-overlay" data-oid="' + U.esc(overlay.id) + '"' +
             (already ? ' disabled' : '') + '>' + (already ? '✓ Added' : 'Add to video') + '</button>' +
         '</div>';
+      } else if (scene.textRecommended && content) {
+        h += '<div style="margin-top:10px">' + ui.note(
+          'The AI recommended on-screen text here, but none of the generated overlays line up with this exact moment. Check the suggested text below, or add your own on the Edit tab.',
+          'warn') + '</div>';
       }
 
       if (scene.editingRecommendation === 'REMOVE') {
