@@ -86,8 +86,10 @@
   /* --------------------------------------------------------------- drawing */
 
   /* Cover-fit the source frame into the target box, cropping the overflow —
-     the same transform TikTok applies, done once here so it is predictable. */
-  function drawFrame(ctx, video, targetW, targetH, crop) {
+     the same transform TikTok applies, done once here so it is predictable.
+     Public so preview.js can share it — the on-screen preview and the actual
+     export must never look different from each other. */
+  X.drawFrame = function drawFrame(ctx, video, targetW, targetH, crop) {
     var vw = video.videoWidth || targetW;
     var vh = video.videoHeight || targetH;
     ctx.fillStyle = '#000';
@@ -389,7 +391,7 @@
             var current = Math.min(video.currentTime, seg.sourceEnd);
             var outputTime = seg.outStart + Math.max(0, current - seg.sourceStart);
 
-            drawFrame(ctx, video, targetW, targetH, crop);
+            X.drawFrame(ctx, video, targetW, targetH, crop);
             X.drawOverlaysAt(ctx, project, outputTime, targetW, targetH);
 
             report(Math.min(0.999, outputTime / timeline.duration),

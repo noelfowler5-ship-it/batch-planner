@@ -164,6 +164,39 @@ ok(gen.value.textOverlays.every(function (o) { return CF.aiSchema.POSITIONS.inde
 ok(gen.value.voiceovers.short.totalSeconds > 0, 'spoken length is estimated from the word count');
 ok(typeof gen.value.voiceovers.short.fitsClip === 'boolean', 'each variant reports whether it fits the clip');
 ok(CF.aiSchema.validateGeneration({}, 20, 'bm').ok === false, 'an empty content response is rejected');
+
+section('ai-schema — policy check: the normal, expected result is "nothing found"');
+var clean = CF.aiSchema.validatePolicyCheck({ overallRisk: 'low', summary: 'No obvious issues found.', flags: [] });
+ok(clean.ok === true, 'a clean result with no flags validates');
+ok(clean.value.flags.length === 0, 'and stays empty — the tool does not invent flags to seem thorough');
+
+section('ai-schema — policy check: repairs a mismatched or messy response');
+var messyPolicy = CF.aiSchema.validatePolicyCheck({
+  overallRisk: 'low', /* contradicts its own flags below — should be recalculated up, not trusted blindly */
+  summary: 'Looks fine',
+  flags: [
+    { category: 'FAKED_DANGER', severity: 'high', source: 'visual', excerpt: 'staged fall at 0:04', reason: 'looks staged for shock value', suggestion: 'cut or relabel as a demo' },
+    { category: 'NONSENSE_CATEGORY', severity: 'extreme', source: 'somewhere', excerpt: 'a caption line', reason: 'unclear claim' },
+    { excerpt: '', reason: '' },
+    'not an object'
+  ]
+});
+ok(messyPolicy.ok === true, 'a messy response is repaired rather than rejected');
+ok(messyPolicy.value.flags.length === 2, 'the empty and non-object entries are dropped, the two real ones kept');
+ok(messyPolicy.value.overallRisk === 'high', 'overallRisk is recalculated from its own flags, not trusted blindly — one HIGH flag means high');
+ok(CF.aiSchema.FLAG_CATEGORIES.indexOf(messyPolicy.value.flags[1].category) >= 0, 'an unknown category is coerced into the allowed set');
+ok(CF.aiSchema.RISK_LEVELS.indexOf(messyPolicy.value.flags[1].severity) >= 0, 'an unknown severity is coerced into the allowed set');
+ok(messyPolicy.repairs.length > 0, 'repairs are reported');
+
+section('ai-schema — policy check: unusable input is rejected, not half-accepted');
+ok(CF.aiSchema.validatePolicyCheck(null).ok === false, 'null is rejected');
+ok(CF.aiSchema.validatePolicyCheck('nonsense').ok === false, 'a non-object is rejected');
+
+section('ai-schema — policy risk bands');
+ok(CF.aiSchema.riskBand('high').tone === 'bad', 'high risk reads as bad');
+ok(CF.aiSchema.riskBand('medium').tone === 'warn', 'medium risk reads as a warning');
+ok(CF.aiSchema.riskBand('low').tone === 'good', 'low risk reads as good');
+ok(CF.aiSchema.riskBand('garbage').tone === 'good', 'an unrecognised value falls back to the safe default, not a scary one');
 `);
 
 /* ============================ editor ==================================== */
@@ -351,6 +384,20 @@ var support = CF.exporter.support();
 ok(support.ok === false, 'the harness has no MediaRecorder, so export is unavailable');
 ok(support.reasons.length > 0, 'and it says why');
 show('reported reason', support.reasons[0]);
+
+section('exporter — drawFrame is public so preview.js can share it');
+ok(typeof CF.exporter.drawFrame === 'function', 'drawFrame is exposed, not a private closure-only helper');
+
+section('preview — guard clauses and idle safety');
+ok(CF.preview.isOpen() === false, 'nothing is open at startup');
+ok(CF.preview.close() === undefined, 'closing with nothing open does not throw');
+ok(CF.preview.toggle() === undefined, 'toggling with nothing open does not throw');
+var noScenes = CF.project.create({ name: 'Empty', video: { duration: 5 } });
+noScenes.edits.segments = []; /* an empty timeline — the editor UI can't normally reach this
+   (toggling always refuses to disable the last segment), but it's cheap insurance against a
+   corrupted or hand-edited project record opening a blank preview instead of explaining why not */
+CF.preview.open(noScenes);
+ok(CF.preview.isOpen() === false, 'opening a project with an empty timeline refuses rather than opening blank');
 `);
 
 /* ============================ AI client plumbing ======================== */
@@ -367,6 +414,20 @@ ok(k1 !== k3, 'a different model is a different cache entry');
 ok(k1 !== k4, 'analysis and generation never share a cache entry');
 ok(k4 !== k5, 'a different language is a different cache entry');
 ok(k1.indexOf('p' + CF.ai.PROMPT_VERSION) >= 0, 'the prompt version is part of the key');
+
+section('ai-client — policy check cache is keyed on the actual content, not just the video');
+var contentA = { hooks: [{ id: 'h1', style: 'curiosity', text: 'Version A' }], captions: [], voiceovers: {}, textOverlays: [] };
+var contentB = { hooks: [{ id: 'h1', style: 'curiosity', text: 'Version B' }], captions: [], voiceovers: {}, textOverlays: [] };
+var hashA1 = CF.ai.contentHashFor(contentA);
+var hashA2 = CF.ai.contentHashFor(contentA);
+var hashB = CF.ai.contentHashFor(contentB);
+ok(hashA1 === hashA2, 'the same generated content hashes the same way');
+ok(hashA1 !== hashB, 'different hook wording hashes differently');
+var pk1 = CF.aiCache.key({ kind: 'policy', fingerprint: 'abc', model: 'm1', contentHash: hashA1 });
+var pk2 = CF.aiCache.key({ kind: 'policy', fingerprint: 'abc', model: 'm1', contentHash: hashB });
+ok(pk1 !== pk2, 'regenerating content with different wording is treated as a fresh question to check');
+var pk3 = CF.aiCache.key({ kind: 'policy', fingerprint: 'abc', model: 'm1', contentHash: hashA1 });
+ok(pk1 === pk3, 'reopening the same project with the same content reuses the cached check for free');
 
 section('ai-client — refuses clearly when it cannot run');
 ok(CF.ai.blockedReason() === null, 'online over http, so AI is available');
@@ -653,11 +714,89 @@ var reloaded = CF.db.loadSettings();
 ok(reloaded.language === 'mix', 'language choice survives a reload');
 ok(reloaded.faceFree === false, 'the face-free toggle survives a reload');
 ok(reloaded.aiModel === 'gemini-test', 'the model choice survives a reload');
+
+section('edit/export — the preview button is offered and reflects state');
+CF.state.studioProject = full; CF.state.tab = 'studio'; CF.state.studioTab = 'edit'; CF.render();
+ok(html('#view-studio').includes('Preview with overlays'), 'the Edit tab offers a preview');
+CF.state.studioTab = 'export'; CF.render();
+ok(html('#view-studio').includes('Preview before rendering'), 'the Export tab offers one last preview before the real render');
+
+section('plan — policy check: nothing generated yet shows nothing');
+var noContent = demoProject();
+noContent.aiContent = null;
+CF.state.studioProject = noContent; CF.state.studioTab = 'plan'; CF.render();
+ok(!html('#view-studio').includes('Policy check'), 'no Policy check section renders before there is any content to check');
+
+section('plan — policy check: content exists, not checked yet');
+CF.state.studioProject = full; CF.state.studioTab = 'plan'; CF.render();
+var notChecked = html('#view-studio');
+ok(notChecked.includes('Policy check'), 'the section appears once content has been generated');
+ok(notChecked.includes('Not checked yet'), 'and says plainly that nothing has run yet');
+ok(notChecked.includes('data-action="check-policy"'), 'a manual check action is offered as a fallback to the automatic one');
+ok(notChecked.includes('not a guarantee of TikTok compliance'), 'the advisory-only disclaimer is shown even before any result exists');
+
+section('plan — policy check: a result with real flags');
+full.policyCheck = {
+  overallRisk: 'high',
+  summary: 'One high-risk item found.',
+  flags: [
+    { id: 'flag1', category: 'FAKED_DANGER', severity: 'high', source: 'visual',
+      excerpt: 'staged fall at 0:04', reason: 'looks staged for shock value, not an honest demo',
+      suggestion: 'trim this section or relabel it clearly as a dramatization' },
+    { id: 'flag2', category: 'UNDISCLOSED_AD', severity: 'medium', source: 'caption',
+      excerpt: 'Benda kecil, banyak guna.', reason: 'no #ad or paid-partnership disclosure anywhere in the generated copy',
+      suggestion: 'add #ad or "paid partnership" to the caption' }
+  ]
+};
+CF.render();
+var checked = html('#view-studio');
+ok(checked.includes('HIGH RISK'), 'the overall risk band is shown');
+ok(checked.includes('One high-risk item found.'), 'the summary is shown');
+ok(checked.includes('Faked or staged danger'), 'a human-readable category label is shown, not the raw enum');
+ok(checked.includes('staged fall at 0:04'), 'the flagged excerpt is quoted');
+ok(checked.includes('trim this section or relabel it clearly'), 'the suggested fix is shown');
+ok(checked.includes('No paid-partnership disclosure'), 'the second flag is also rendered');
+ok(checked.includes('not a guarantee of TikTok compliance'), 'the advisory-only disclaimer is still shown alongside real results');
+ok(checked.includes('data-action="recheck-policy"'), 'a manual re-check action is offered');
+ok(!/undefined|NaN/.test(checked), 'the populated policy section has no leaked placeholders');
 `);
   return Promise.resolve();
+}
+
+/* Real playback/canvas drawing needs a real browser — see the README's
+   manual-check list. What's safe and worth asserting headlessly is that
+   open()/close() manage the modal and their own resources correctly. */
+function previewOpenClose(ctx) {
+  const CF = ctx.CF;
+  return CF.db.putVideo({ id: 'v1', blob: new ctx.Blob(['x']), thumb: null, frames: [], name: 'c.mp4', size: 4 })
+    .then(function () {
+      app.run(`
+section('preview — open/close lifecycle with a real video record');
+ok(CF.preview.isOpen() === false, 'nothing open before this test');
+CF.preview.open(CF.state.studioProject); /* 'full', left set by the previous section */
+`);
+      /* open() resolves through CF.db.getVideo(...).then(...) internally — give
+         the microtask/timer queue a turn to run it before asserting on the result. */
+      return new Promise(function (resolve) { setTimeout(resolve, 10); });
+    })
+    .then(function () {
+      app.run(`
+ok(CF.preview.isOpen() === true, 'opening a project with a stored video record succeeds');
+var modalHtml = html('#modalRoot');
+ok(modalHtml.includes('previewCanvas'), 'the preview canvas is in the modal');
+ok(modalHtml.includes('data-action="preview-toggle"'), 'a play/pause control is offered');
+ok(modalHtml.includes('Silent preview'), 'the silent-preview disclosure is shown, matching the chosen scope');
+ok(!/undefined|NaN/.test(modalHtml), 'the preview modal has no leaked placeholders');
+
+CF.preview.close();
+ok(CF.preview.isOpen() === false, 'close() tears the loop and resources down');
+CF.ui.closeModal();
+`);
+    });
 }
 
 app.runAsync(freshInstall)
   .then(function () { return app.runAsync(storageRoundTrip); })
   .then(function () { return app.runAsync(studioScreens); })
+  .then(function () { return app.runAsync(previewOpenClose); })
   .then(function () { app.done(); });

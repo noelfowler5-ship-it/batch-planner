@@ -120,6 +120,10 @@
 
   function switchTab(tab) {
     if (ui.VIEWS.indexOf(tab) < 0) return;
+    /* Preview owns a live <video> and a requestAnimationFrame loop. Navigating
+       away via a bottom-nav tap bypasses the modal's own close handling, so
+       stop it here too rather than letting it keep decoding in the background. */
+    CF.preview.close();
     state.tab = tab;
     if (ui.TABS.indexOf(tab) >= 0) {
       state.settings.lastTab = tab;
@@ -354,11 +358,66 @@
       }
       return commit().then(function () {
         ui.toast(result.cached ? 'Loaded saved content — no quota used' : 'Content ready', 'ok');
+        /* Runs automatically, right after content exists to check. Cheap on
+           a reopened project (same content = same cache key = no quota), and
+           only ever costs real quota when the words actually changed. */
+        runPolicyCheck(project);
       });
     }).catch(function (err) {
       stop();
       render();
       reportAiError(err, state.settings.aiModel);
+    });
+  }
+
+  /* A heuristic self-check for common affiliate-content risks (faked
+     promotion/urgency, faked danger, missing paid-partnership disclosure,
+     fake testimonials, unverifiable claims) — reviews both the generated
+     words and the actual frames. Advisory only: never a guarantee of TikTok
+     compliance, which the UI says plainly wherever the result is shown. */
+  function runPolicyCheck(project, force) {
+    if (state.aiBusy.active) return;
+    if (!project.aiContent) return;
+
+    state.aiBusy = { active: true, kind: 'policy', label: 'Checking for policy risks', fraction: 0.15 };
+    render();
+
+    var tick = setInterval(function () {
+      state.aiBusy.fraction = Math.min(0.9, state.aiBusy.fraction + 0.04);
+      render();
+    }, 900);
+    var stop = function () {
+      clearInterval(tick);
+      state.aiBusy = { active: false, kind: null, label: '', fraction: 0 };
+    };
+
+    framesFor(project).then(function (frames) {
+      return CF.ai.checkPolicy({
+        frames: frames,
+        duration: project.video.duration,
+        fingerprint: project.fingerprint,
+        content: project.aiContent,
+        language: project.language,
+        model: state.settings.aiModel,
+        force: force
+      });
+    }).then(function (result) {
+      stop();
+      project.policyCheck = result.policyCheck;
+      return commit().then(function () {
+        if (result.cached) return;
+        var n = result.policyCheck.flags.length;
+        if (!n) ui.toast('Policy check: looks fine', 'ok');
+        else ui.toast('Policy check: ' + n + ' thing' + (n === 1 ? '' : 's') + ' to review',
+                       result.policyCheck.overallRisk === 'high' ? 'err' : 'warn');
+      });
+    }).catch(function (err) {
+      stop();
+      render();
+      /* A best-effort automatic check failing shouldn't interrupt the
+         content-ready flow with a hard error dialog — a quiet toast plus the
+         manual "Check again" button (once content exists) is enough. */
+      ui.toast('Policy check failed: ' + ((err && err.message) || 'unknown error'), 'warn');
     });
   }
 
@@ -547,9 +606,13 @@
     switch (action) {
       /* ------------------------------------------------------- chrome */
       case 'modal-backdrop':
-        if (e.target === el) ui.closeModal();
+        /* A live preview owns a <video>/<canvas> and a requestAnimationFrame
+           loop — always stop it here, not just on the dedicated Close
+           button, so tapping outside the modal can't leave it running. */
+        if (e.target === el) { CF.preview.close(); ui.closeModal(); }
         break;
       case 'close-modal':
+        CF.preview.close();
         ui.closeModal();
         break;
       case 'pick-file': {
@@ -693,6 +756,12 @@
       case 'regenerate-content':
         if (project) runGeneration(project, true);
         break;
+      case 'check-policy':
+        if (project) runPolicyCheck(project, false);
+        break;
+      case 'recheck-policy':
+        if (project) runPolicyCheck(project, true);
+        break;
       case 'set-project-language':
         if (project) {
           project.language = value;
@@ -797,6 +866,12 @@
         break;
       case 'toggle-mute':
         if (project) { CF.editor.toggleMute(project); commit(); }
+        break;
+      case 'preview-open':
+        if (project) CF.preview.open(project);
+        break;
+      case 'preview-toggle':
+        CF.preview.toggle();
         break;
 
       /* ------------------------------------------------------ overlays */
@@ -938,7 +1013,7 @@
 
     document.addEventListener('click', onClick);
     document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && ui.isModalOpen()) ui.closeModal();
+      if (e.key === 'Escape' && ui.isModalOpen()) { CF.preview.close(); ui.closeModal(); }
     });
     var fileInput = ui.$('#fileInput');
     if (fileInput) fileInput.addEventListener('change', onFileChosen);

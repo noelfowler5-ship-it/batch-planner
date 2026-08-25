@@ -360,4 +360,77 @@
     ['ctaPotential', 'CTA potential']
   ];
 
+  /* -------------------------------------------------------- policy check */
+
+  A.RISK_LEVELS = ['low', 'medium', 'high'];
+  A.FLAG_CATEGORIES = [
+    'FAKED_PROMOTION', 'FAKED_DANGER', 'UNDISCLOSED_AD',
+    'FAKE_TESTIMONIAL', 'UNVERIFIABLE_CLAIM', 'MISLEADING_RESULT'
+  ];
+  A.FLAG_SOURCES = ['hook', 'caption', 'voiceover', 'overlay', 'visual'];
+
+  A.FLAG_CATEGORY_LABEL = {
+    FAKED_PROMOTION: 'Faked promotion / urgency',
+    FAKED_DANGER: 'Faked or staged danger',
+    UNDISCLOSED_AD: 'No paid-partnership disclosure',
+    FAKE_TESTIMONIAL: 'Fake testimonial',
+    UNVERIFIABLE_CLAIM: 'Unverifiable claim',
+    MISLEADING_RESULT: 'Misleading result'
+  };
+
+  A.validatePolicyCheck = function (raw) {
+    var repairs = [];
+    if (!raw || typeof raw !== 'object') {
+      return { ok: false, errors: ['The AI response was not an object.'] };
+    }
+
+    var flags = (Array.isArray(raw.flags) ? raw.flags : [])
+      .map(function (f, i) {
+        if (!f || typeof f !== 'object') { repairs.push('dropped a non-object flag'); return null; }
+        var excerpt = str(f.excerpt, 300);
+        var reason = str(f.reason, 300);
+        if (!excerpt && !reason) { repairs.push('dropped an empty flag'); return null; }
+        return {
+          id: 'flag' + (i + 1),
+          category: oneOf(f.category, A.FLAG_CATEGORIES, 'UNVERIFIABLE_CLAIM'),
+          severity: oneOf(f.severity, A.RISK_LEVELS, 'medium'),
+          source: oneOf(f.source, A.FLAG_SOURCES, 'visual'),
+          excerpt: excerpt || '(unspecified)',
+          reason: reason || 'No explanation given.',
+          suggestion: str(f.suggestion, 300)
+        };
+      })
+      .filter(Boolean);
+
+    var stated = oneOf(raw.overallRisk, A.RISK_LEVELS, null);
+    var bySeverity = { high: 0, medium: 0, low: 0 };
+    flags.forEach(function (f) { bySeverity[f.severity]++; });
+    var implied = bySeverity.high ? 'high' : bySeverity.medium ? 'medium' : flags.length ? 'low' : 'low';
+
+    /* Trust what the flags actually show over a mismatched top-line claim —
+       the whole point of this check is not to be quietly over- or
+       under-confident about what it found. */
+    var overallRisk = stated;
+    if (!overallRisk || (overallRisk === 'low' && implied !== 'low')) {
+      if (overallRisk !== implied) repairs.push('overallRisk did not match its own flags — recalculated');
+      overallRisk = implied;
+    }
+
+    var summary = str(raw.summary, 300) ||
+      (flags.length ? flags.length + ' potential issue' + (flags.length === 1 ? '' : 's') + ' found.' : 'No obvious issues found.');
+
+    return {
+      ok: true,
+      value: { overallRisk: overallRisk, summary: summary, flags: flags },
+      repairs: repairs,
+      errors: []
+    };
+  };
+
+  A.riskBand = function (risk) {
+    if (risk === 'high') return { label: 'HIGH RISK — review carefully', tone: 'bad' };
+    if (risk === 'medium') return { label: 'WORTH A SECOND LOOK', tone: 'warn' };
+    return { label: 'LOOKS FINE', tone: 'good' };
+  };
+
 })(window.CF);

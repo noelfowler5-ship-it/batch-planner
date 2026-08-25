@@ -34,9 +34,23 @@ suggestions" switches off the REMOVE scenes and adds the overlays in one tap.
 the real clip, and timed text overlays. In casual Bahasa Melayu, BM + English,
 or English.
 
-**Edit** — trim, split, reorder, enable/disable segments, 9:16 crop, mute,
-text overlays with position and style, full undo/redo. The source video is never
-modified; every edit is an instruction recorded against it.
+**Edit** — enable/disable scenes (order and timing stay locked to the AI's
+plan), 9:16 crop, mute, apply a hook as on-screen text, full undo/redo. The
+source video is never modified; every edit is an instruction recorded against
+it. A **Preview** button on both Edit and Export plays the clip back — silent,
+with overlays burned in — exactly as it will export, so you can check text
+placement and timing before spending real render time.
+
+**Policy check** — after content is generated, the app automatically asks
+Gemini to scan the hooks, captions, voiceover and overlays (plus the video
+frames) for patterns that commonly trigger TikTok affiliate policy strikes:
+faked promotion/urgency, faked or staged danger, missing paid-partnership
+disclosure, fake testimonials, unverifiable claims, misleading results. Each
+flag names the risky line, why it's risky, and a suggested fix. It's a
+heuristic self-check, not a compliance verdict — the app says so everywhere
+this result is shown — and it's cheap to re-run: regenerating content with
+new text triggers a fresh check automatically, but reopening a project with
+unchanged content reuses the cached result.
 
 **Export** — renders to 1080×1920 in the browser and saves the file. No upload,
 no watermark, no account.
@@ -65,17 +79,19 @@ Browser (all video work is local)
        ai-client.js      the only file that touches the network; owns the cache
        editor.js         segments, overlays, undo/redo, source→output mapping
        export.js         canvas + MediaRecorder render; optional MP4 convert
+       preview.js        silent playback preview (reuses export.js's drawing)
        ui.js             toasts, modal, tabs, markup builders
        screens.js        Create / Projects / Queue / Settings
-       studio.js         Overview / Director / Content / Edit / Export
+       studio.js         Plan (Overview/Director/Content/Policy) / Edit / Export
        app.js            state, boot, one delegated click handler
 
 Netlify Functions (AI only — never video bytes)
   └─ netlify/functions/
-       lib/gemini.mjs        shared helpers (not deployed as a function)
-       gemini-analyze.js     POST /api/gemini/analyze
-       gemini-generate.js    POST /api/gemini/generate
-       gemini-models.js      GET  /api/gemini/models
+       lib/gemini.mjs           shared helpers (not deployed as a function)
+       gemini-analyze.js        POST /api/gemini/analyze
+       gemini-generate.js       POST /api/gemini/generate
+       gemini-policy-check.js   POST /api/gemini/policy-check
+       gemini-models.js         GET  /api/gemini/models
 ```
 
 **No framework, no npm, no build step, no database, no user accounts.**
@@ -115,12 +131,15 @@ correctly on a first-ever offline open.
 ### Two things that keep the AI free
 
 1. **Caching.** Every result is stored against
-   `fingerprint + prompt version + model + language`. Re-opening a project, or
-   re-analysing the same clip, costs nothing. Only an explicit "Re-analyse"
-   spends quota, and it asks first.
-2. **Two cheap calls, not one expensive one.** Analysis gets images; generation
-   gets only the resulting text plan. The model is never asked to "make my
-   TikTok" in one shot.
+   `fingerprint + prompt version + model + language` (the policy check also
+   keys on a hash of the actual generated content, so editing the text
+   triggers a fresh check but reopening an unchanged project doesn't).
+   Re-opening a project, or re-analysing the same clip, costs nothing. Only an
+   explicit "Re-analyse" or "Re-check" spends quota, and it asks first.
+2. **Small, separate calls, not one expensive one.** Analysis gets images;
+   generation gets only the resulting text plan; the policy check gets the
+   text plan plus the frames it needs to check visuals. The model is never
+   asked to "make my TikTok" in one shot.
 
 ### Never trusting model output
 
@@ -174,7 +193,7 @@ installed copies keep serving the old version.
 
 ```
 cd clipforge
-node test/run.cjs      # 197 assertions — browser app
+node test/run.cjs      # 273 assertions — browser app
 node test/server.mjs   #  26 assertions — Netlify proxy helpers
 ```
 
@@ -205,7 +224,15 @@ verified by hand:
    least-tested path: it depends on `captureStream`, `MediaRecorder` and
    `AudioContext` behaviour that varies by browser. If it fails, the app reports
    why rather than hanging.
-4. **MP4 conversion** — downloads ffmpeg.wasm from a CDN on first use
-5. A real Gemini call with a live API key
-6. An iPhone HEVC `.mov` — some browsers refuse to decode it, and the app should
+4. **Preview** — open it from Edit and from Export, confirm play/pause actually
+   drives the hidden `<video>` and the canvas draws overlays in sync, and that
+   closing it (X, Esc, backdrop tap) always stops playback and frees the object
+   URL — the harness can fake the open/close plumbing but not real `<video>`
+   timing.
+5. **MP4 conversion** — downloads ffmpeg.wasm from a CDN on first use
+6. A real Gemini call with a live API key, including **the policy check** —
+   confirm it fires automatically after generation and that a genuinely risky
+   script (e.g. a hook claiming a fake discount deadline) actually gets
+   flagged, not just the happy "looks fine" path
+7. An iPhone HEVC `.mov` — some browsers refuse to decode it, and the app should
    say so clearly rather than hang

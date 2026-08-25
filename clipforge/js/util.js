@@ -139,6 +139,20 @@ U.aspectLabel = function (w, h) {
 /* A stable identity for a video, so Phase 2 can cache an analysis and never
    pay for the same clip twice. Name+size+mtime+duration is collision-safe
    enough for one person's library and costs nothing to compute. */
+/* djb2 — not cryptographic, just cheap and stable enough to notice when two
+   inputs differ. Used anywhere a piece of content needs a short, stable id
+   without hashing the whole thing every comparison (video identity, and
+   detecting when generated content has changed since something was checked
+   against it). */
+U.hashString = function (s) {
+  var h = 5381;
+  var str = String(s == null ? '' : s);
+  for (var i = 0; i < str.length; i++) {
+    h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(36);
+};
+
 U.videoFingerprint = function (file, duration) {
   var parts = [
     (file && file.name) || '',
@@ -146,11 +160,7 @@ U.videoFingerprint = function (file, duration) {
     (file && file.lastModified) || 0,
     U.round(duration || 0, 2)
   ].join('|');
-  var h = 5381;
-  for (var i = 0; i < parts.length; i++) {
-    h = ((h << 5) + h + parts.charCodeAt(i)) >>> 0;
-  }
-  return 'v' + h.toString(36) + '_' + ((file && file.size) || 0).toString(36);
+  return 'v' + U.hashString(parts) + '_' + ((file && file.size) || 0).toString(36);
 };
 
 U.dataUrlBytes = function (dataUrl) {

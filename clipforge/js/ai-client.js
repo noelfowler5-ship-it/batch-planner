@@ -18,6 +18,7 @@
   var ENDPOINTS = {
     analyze: '/api/gemini/analyze',
     generate: '/api/gemini/generate',
+    policyCheck: '/api/gemini/policy-check',
     models: '/api/gemini/models'
   };
 
@@ -112,7 +113,12 @@
       parts.fingerprint || 'nofp',
       'p' + client.PROMPT_VERSION,
       parts.model || 'default',
-      parts.language || '-'
+      parts.language || '-',
+      /* Only the policy check needs this: it reviews specific generated
+         text, so a cache hit must require that exact text, not just the
+         same video — regenerating content with different wording is a
+         different question to ask, and deserves its own answer. */
+      parts.contentHash || '-'
     ].join('|');
   };
 
@@ -225,6 +231,67 @@
         }, checked.value).then(function () {
           return { content: checked.value, cached: false, model: data.model, repairs: checked.repairs };
         });
+      });
+    });
+  };
+
+  /* -------------------------------------------------------------- policy check */
+
+  /* A stable id for "this exact generated content", so re-checking after
+     regenerating (different wording) is treated as a new question, while
+     reopening the same project reuses the answer for free. */
+  function contentHashFor(content) {
+    return U.hashString(JSON.stringify({
+      hooks: (content && content.hooks) || [],
+      captions: (content && content.captions) || [],
+      voiceovers: (content && content.voiceovers) || {},
+      textOverlays: (content && content.textOverlays) || []
+    }));
+  }
+  client.contentHashFor = contentHashFor;
+
+  /* opts: { frames, duration, fingerprint, content, language, model, force } */
+  client.checkPolicy = function (opts) {
+    var blocked = client.blockedReason();
+    if (blocked) return Promise.reject(new Error(blocked));
+    if (!opts.content) return Promise.reject(new Error('Generate content before checking it.'));
+
+    var hash = contentHashFor(opts.content);
+    var cacheParts = { kind: 'policy', fingerprint: opts.fingerprint, model: opts.model, contentHash: hash };
+
+    var lookup = opts.force ? Promise.resolve(null) : cache.get(cacheParts);
+
+    return lookup.then(function (hit) {
+      if (hit && hit.value) {
+        return { policyCheck: hit.value, cached: true, model: hit.model };
+      }
+      if (!opts.frames || !opts.frames.length) {
+        throw new Error('This project has no extracted frames to check.');
+      }
+
+      return request(ENDPOINTS.policyCheck, {
+        method: 'POST',
+        body: {
+          frames: opts.frames,
+          duration: opts.duration,
+          hooks: opts.content.hooks,
+          captions: opts.content.captions,
+          voiceovers: opts.content.voiceovers,
+          textOverlays: opts.content.textOverlays,
+          language: opts.language,
+          model: opts.model || undefined
+        }
+      }).then(function (data) {
+        var checked = CF.aiSchema.validatePolicyCheck(data.policyCheck);
+        if (!checked.ok) {
+          var err = new Error(checked.errors[0] || 'The AI returned an unusable policy check.');
+          err.code = 'bad_json';
+          throw err;
+        }
+        return cache.put({ kind: 'policy', fingerprint: opts.fingerprint, model: data.model, contentHash: hash }, checked.value)
+          .then(function () {
+            return { policyCheck: checked.value, cached: false, model: data.model, repairs: checked.repairs };
+          });
       });
     });
   };

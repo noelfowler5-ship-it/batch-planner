@@ -737,3 +737,20 @@ nav.bottom button.on { color: var(--accent); }
 .seg-pick:active {
   opacity: 0.8;
 }
+
+/* ------------------------------------------------------------- preview */
+
+.preview-shell {
+  display: flex;
+  justify-content: center;
+  background: #000;
+  border-radius: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+}
+.preview-shell canvas {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  display: block;
+}

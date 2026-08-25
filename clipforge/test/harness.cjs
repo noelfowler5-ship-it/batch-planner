@@ -25,6 +25,7 @@ const SCRIPTS = [
   'js/ui.js',
   'js/screens.js',
   'js/studio.js',
+  'js/preview.js',
   'js/app.js'
 ];
 
@@ -52,6 +53,10 @@ function boot(rootDir, opts) {
       addEventListener() {}, removeEventListener() {},
       appendChild() {}, removeChild() {}, remove() {}, click() {},
       select() {}, focus() {}, blur() {},
+      /* HTMLMediaElement stubs — real playback can't be simulated headlessly,
+         but code that just calls .play()/.pause() (e.g. preview.js, export.js)
+         should not crash the harness for doing so. */
+      play() { return undefined; }, pause() {},
       setAttribute() {}, getAttribute() { return null; }, insertAdjacentHTML() {},
       getContext() {
         return { drawImage() {}, fillRect() {}, clearRect() {}, fillText() {} };

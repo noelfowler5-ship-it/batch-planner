@@ -43,6 +43,7 @@
       aiModel: null,
       score: null,
       scenes: [],
+      policyCheck: null,
 
       /* Edits are instructions against the untouched source video, never a
          re-encode of it (spec §25/§40) — so everything stays reversible. */

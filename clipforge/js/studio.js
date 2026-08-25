@@ -41,6 +41,8 @@
     curiosity: 'Curiosity', problem: 'Problem / benefit', casual: 'Casual / value'
   };
 
+  var POLICY_DISCLAIMER = 'Advisory only — a heuristic self-check based on common patterns, not a guarantee of TikTok compliance. Always review TikTok\'s current Community Guidelines and Branded Content Policy yourself before posting.';
+
   /* ------------------------------------------------------------------ shell */
 
   St.render = function () {
@@ -135,6 +137,7 @@
     h += renderScore(project);
     h += renderScenePlan(project);
     h += renderContentSection(project);
+    h += renderPolicyCheck(project);
 
     h += '<div style="height:6px"></div>';
     h += '<button class="btn-primary btn-block" data-action="studio-tab" data-value="edit">Continue to Edit</button>';
@@ -420,6 +423,67 @@
     return h;
   }
 
+  /* --------------------------------------------------------- policy check */
+
+  /* A self-check for the patterns that most often get an affiliate creator
+     flagged — faked promotion/urgency, faked danger, missing paid-partnership
+     disclosure, fake testimonials, unverifiable claims. Advisory only: this
+     is a heuristic pattern check, never a guarantee of TikTok compliance,
+     which is stated plainly wherever a result is shown here. */
+  function renderPolicyCheck(project) {
+    var st = CF.state;
+
+    if (st.aiBusy.active && st.aiBusy.kind === 'policy') {
+      return '<div class="section-label">Policy check</div>' + busyBar(st.aiBusy.label, st.aiBusy.fraction);
+    }
+
+    if (!project.aiContent) return ''; /* nothing generated yet to check */
+
+    var h = '<div class="section-label">Policy check</div>';
+
+    if (!project.policyCheck) {
+      h += '<div class="card">';
+      h += '<div class="small muted">Not checked yet. This runs automatically right after content is generated — if you\'re seeing this, the automatic check may have failed.</div>';
+      h += '</div>';
+      h += '<button class="btn-sm btn-block" data-action="check-policy"' +
+           (CF.ai.blockedReason() ? ' disabled' : '') + '>Check for policy risks</button>';
+      h += '<div class="tiny faint" style="margin-top:8px">' + U.esc(POLICY_DISCLAIMER) + '</div>';
+      return h;
+    }
+
+    var pc = project.policyCheck;
+    var band = CF.aiSchema.riskBand(pc.overallRisk);
+
+    h += '<div class="card">';
+    h += '<div class="bold" style="color:var(--' + band.tone + ')">' + U.esc(band.label) + '</div>';
+    h += '<div class="small muted" style="margin-top:6px">' + U.esc(pc.summary) + '</div>';
+    h += '</div>';
+
+    pc.flags.forEach(function (flag) {
+      h += '<div class="card card-tight">';
+      h += '<div class="row-between">';
+      h += '<span class="tag" style="' + (flag.severity === 'high' ? 'color:var(--bad);border-color:rgba(229,84,75,.4)' :
+        flag.severity === 'medium' ? 'color:var(--warn);border-color:rgba(232,177,58,.4)' : '') + '">' +
+        U.esc(flag.severity) + '</span>';
+      h += '<span class="tiny faint">' + U.esc(flag.source) + '</span>';
+      h += '</div>';
+      h += '<div class="bold" style="margin-top:6px">' + U.esc(CF.aiSchema.FLAG_CATEGORY_LABEL[flag.category] || flag.category) + '</div>';
+      h += '<div class="small" style="margin-top:4px;font-style:italic">“' + U.esc(flag.excerpt) + '”</div>';
+      h += '<div class="small muted" style="margin-top:6px">' + U.esc(flag.reason) + '</div>';
+      if (flag.suggestion) {
+        h += '<div class="suggest" style="margin-top:8px"><div class="suggest-label">Suggested fix</div>' +
+          '<div class="small">' + U.esc(flag.suggestion) + '</div></div>';
+      }
+      h += '</div>';
+    });
+
+    h += ui.note(U.esc(POLICY_DISCLAIMER), 'warn');
+    h += '<div style="height:8px"></div>';
+    h += '<button class="btn-ghost btn-block" data-action="recheck-policy"' +
+         (CF.ai.blockedReason() ? ' disabled' : '') + '>Check again (uses quota)</button>';
+    return h;
+  }
+
   /* ------------------------------------------------------------------- edit */
 
   function renderEdit(project) {
@@ -463,6 +527,11 @@
     CF.editor.overlapWarnings(project).forEach(function (w) {
       h += ui.note('⚠️ ' + U.esc(w), 'warn');
     });
+
+    h += '<button class="btn-primary btn-block" style="margin-top:4px" data-action="preview-open"' +
+      (timeline.segments.length ? '' : ' disabled') + '>▶ Preview with overlays</button>';
+    h += '<div class="tiny faint" style="margin-top:6px;margin-bottom:16px">' +
+      'Watch your cuts and text together before spending the time to actually export — silent, no file saved.</div>';
 
     /* format controls */
     h += '<div class="section-label">Format</div>';
@@ -549,14 +618,20 @@
       (project.edits.muted ? 'muted' : 'from source') + '</span></div>';
     h += '</div>';
 
-    if (!support.ok) {
-      h += ui.note('<b>This browser cannot export.</b> ' + U.esc(support.reasons.join(' ')) +
-        ' Try Chrome or Safari on a normal (non-private) window.', 'warn');
+    if (!timeline.segments.length) {
+      h += ui.note('Nothing is switched on. Enable at least one segment on the Edit tab.', 'warn');
       return h;
     }
 
-    if (!timeline.segments.length) {
-      h += ui.note('Nothing is switched on. Enable at least one segment on the Edit tab.', 'warn');
+    /* Preview only needs canvas + a <video>, not MediaRecorder — offer it even
+       on a browser that cannot actually export, since it's still useful to
+       check the edit on a device you can't render on. */
+    h += '<button class="btn-sm btn-block" data-action="preview-open">▶ Preview before rendering</button>';
+    h += '<div style="height:16px"></div>';
+
+    if (!support.ok) {
+      h += ui.note('<b>This browser cannot export.</b> ' + U.esc(support.reasons.join(' ')) +
+        ' Try Chrome or Safari on a normal (non-private) window.', 'warn');
       return h;
     }
 
