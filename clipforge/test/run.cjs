@@ -540,6 +540,35 @@ ok(html('#modalRoot').includes('Rename project'), 'the rename form opens');
 CF.ui.closeModal();
 ok(html('#modalRoot') === '', 'closing clears the modal root');
 
+section('settings — model picker is actually clickable');
+/* Regression test: an earlier version rendered the full model list inside a
+   <select onchange="void 0">, which is inert under the app's single delegated
+   click listener — selecting a model there did nothing, and only the first 3
+   quick-pick chips actually worked. Every model must be a real data-action
+   button so tapping it in the list has an effect. */
+CF.state.models = [
+  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', inputTokenLimit: 1000000 },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', inputTokenLimit: 1000000 },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', inputTokenLimit: 1000000 },
+  { id: 'gemini-unusual-name', label: 'A model past the old 3-chip cutoff', inputTokenLimit: 1000000 }
+];
+CF.state.tab = 'settings'; CF.render();
+var settingsHtml = html('#view-settings');
+ok(!/<select/.test(settingsHtml), 'the settings screen has no inert <select> for model choice');
+ok(!/onchange/.test(settingsHtml), 'no onchange handler is relied on outside the click delegate');
+ok((settingsHtml.match(/data-action="set-model"/g) || []).length === CF.state.models.length + 1,
+   'every model PLUS the default option is a real set-model button — including ones past the old 3-chip cutoff');
+ok(settingsHtml.includes('gemini-unusual-name'), 'a model beyond the old top-3 is actually reachable, not just visible');
+
+/* Simulate tapping that 4th model exactly as the click handler does, and
+   confirm the choice actually sticks after leaving and returning to Settings —
+   the concrete symptom that was reported ("it turns back to default"). */
+CF.state.settings.aiModel = 'gemini-unusual-name';
+CF.db.saveSettings(CF.state.settings);
+CF.state.tab = 'projects'; CF.render();
+CF.state.tab = 'settings'; CF.render();
+ok(html('#view-settings').includes('gemini-unusual-name'), 'the picked model is still shown as in-use after switching tabs and back');
+
 section('settings persistence');
 CF.state.settings.language = 'mix';
 CF.state.settings.faceFree = false;

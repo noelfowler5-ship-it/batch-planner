@@ -316,7 +316,7 @@
     }).catch(function (err) {
       stop();
       render();
-      reportAiError(err);
+      reportAiError(err, state.settings.aiModel);
     });
   }
 
@@ -358,16 +358,38 @@
     }).catch(function (err) {
       stop();
       render();
-      reportAiError(err);
+      reportAiError(err, state.settings.aiModel);
     });
   }
 
-  function reportAiError(err) {
+  /* Toasts vanish in a few seconds — too fast to read a technical error, let
+     alone copy it. A failed AI call opens a small dialog instead, with the
+     server's raw detail (if any) and a Copy button, so the exact wording can
+     be reported back rather than a paraphrase of it. */
+  function reportAiError(err, modelTried) {
     var message = (err && err.message) || 'The AI request failed.';
-    ui.toast(message, 'err');
-    if (err && err.code === 'quota') {
-      ui.toast('You can keep editing locally and try again later', 'warn');
+    var detail = err && err.detail;
+    var tried = modelTried || 'server default';
+
+    var h = '<div class="modal-title">AI request failed</div>';
+    h += '<div class="small" style="margin-bottom:12px">' + U.esc(message) + '</div>';
+    h += '<div class="card card-tight">';
+    h += '<div class="tiny faint">Model tried</div>';
+    h += '<div class="small mono" style="margin-top:2px">' + U.esc(tried) + '</div>';
+    if (detail) {
+      h += '<div class="tiny faint" style="margin-top:10px">Server detail</div>';
+      h += '<div class="small mono" style="margin-top:2px;word-break:break-word">' + U.esc(detail) + '</div>';
     }
+    h += '</div>';
+    if (err && err.code === 'quota') {
+      h += ui.note('You can keep editing locally and try again later.', 'warn');
+    }
+    var copyPayload = 'ClipForge AI error\nMessage: ' + message + '\nModel: ' + tried + (detail ? '\nDetail: ' + detail : '');
+    h += '<div class="row" style="gap:8px;margin-top:6px">';
+    h += '<button class="btn-ghost" style="flex:1" data-action="close-modal">Close</button>';
+    h += '<button class="btn-sm" style="flex:1" data-action="copy-text" data-copy="' + U.esc(copyPayload) + '">Copy details</button>';
+    h += '</div>';
+    ui.openModal(h);
   }
 
   /* ---------------------------------------------------------- batch mode */

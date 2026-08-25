@@ -378,22 +378,17 @@
     if (st.models === 'loading') {
       h += '<div class="tiny faint" style="margin-top:12px">Loading the model list…</div>';
     } else if (Array.isArray(st.models)) {
-      h += '<div style="height:12px"></div>';
-      h += '<label class="field" style="margin-bottom:0"><span>Available to your API key</span>' +
-        '<select id="modelSelect" onchange="void 0">' +
-        '<option value="__default__">Server default</option>' +
-        st.models.map(function (m) {
-          return '<option value="' + U.esc(m.id) + '"' + (m.id === current ? ' selected' : '') + '>' +
-            U.esc(m.label) + '</option>';
-        }).join('') +
-      '</select></label>';
-      h += '<div class="chips" style="margin-top:10px">';
-      h += '<button class="chip" data-action="set-model" data-value="__default__">Use default</button>';
-      st.models.slice(0, 3).forEach(function (m) {
-        h += '<button class="chip' + (m.id === current ? ' on' : '') + '" data-action="set-model" data-value="' +
-          U.esc(m.id) + '">' + U.esc(m.id.replace(/^gemini-/, '')) + '</button>';
+      h += '<div class="section-label" style="margin:16px 0 6px">Available to your API key ' +
+        '(' + st.models.length + ')</div>';
+      h += '<button class="btn-xs btn-block model-row' + (current === '' ? ' on' : '') +
+        '" data-action="set-model" data-value="__default__">' +
+        '<span>Server default</span>' + (current === '' ? '<span>✓</span>' : '') + '</button>';
+      st.models.forEach(function (m) {
+        var on = m.id === current;
+        h += '<button class="btn-xs btn-block model-row' + (on ? ' on' : '') + '" data-action="set-model" data-value="' +
+          U.esc(m.id) + '"><span>' + U.esc(m.label) + '</span>' + (on ? '<span>✓</span>' : '') + '</button>';
       });
-      h += '</div>';
+      h += '<button class="btn-sm btn-block" style="margin-top:10px" data-action="load-models">Refresh list</button>';
     } else {
       h += '<button class="btn-sm btn-block" style="margin-top:12px" data-action="load-models">' +
         'Show models my key can use</button>';
