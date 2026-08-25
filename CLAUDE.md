@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Two apps live in this repo
+
+1. **Batch Planner** (repo root, `index.html`) — the original weekly TikTok planner,
+   documented below. Live and deployed.
+2. **ClipForge AI** (`clipforge/`) — a newer, separate local-first AI video editor for the
+   same creator. Different product, no shared code. **See `clipforge/README.md`** for its
+   architecture, phase plan and tests before touching anything in that folder.
+
+Changes to one must not affect the other. `netlify/functions/` currently holds only the
+Batch Planner's six TikTok functions; ClipForge's Gemini proxy functions land there too
+from Phase 2 onward.
+
 ## What this is
 
 A personal weekly TikTok content planner for one creator (@ultramain, kitchen-gadget

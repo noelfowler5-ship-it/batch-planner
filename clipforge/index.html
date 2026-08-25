@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b0d">
+<title>ClipForge AI</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="css/app.css">
+<!-- Layout-critical fallback: if app.css somehow fails to load, the app is still
+     legible and navigable rather than a pile of unstyled text. -->
+<style>
+  body { background:#0b0b0d; color:#ececf0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; margin:0; padding-bottom:70px; }
+  .wrap { max-width:620px; margin:0 auto; padding:14px; }
+  .hidden { display:none !important; }
+  nav.bottom { position:fixed; left:0; right:0; bottom:0; display:flex; background:#101013; border-top:1px solid #2a2a32; }
+  nav.bottom button { flex:1; min-height:62px; background:none; border:none; color:#6a6a75; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="spark">CF</span> ClipForge AI</div>
+    <div class="spacer"></div>
+    <span id="netPill" class="net-pill">…</span>
+  </div>
+</header>
+
+<main>
+  <section id="view-create"   class="wrap"></section>
+  <section id="view-projects" class="wrap hidden"></section>
+  <section id="view-queue"    class="wrap hidden"></section>
+  <section id="view-settings" class="wrap hidden"></section>
+</main>
+
+<nav class="bottom">
+  <button data-tab="create"   class="navbtn on"><span class="ico">＋</span>CREATE</button>
+  <button data-tab="projects" class="navbtn"><span class="ico">▤</span>PROJECTS</button>
+  <button data-tab="queue"    class="navbtn"><span class="ico">☰</span>QUEUE</button>
+  <button data-tab="settings" class="navbtn"><span class="ico">⚙</span>SETTINGS</button>
+</nav>
+
+<div id="modalRoot"></div>
+<div id="toasts"></div>
+
+<!-- Hidden file input, driven by the dropzone and the upload button. -->
+<input type="file" id="fileInput" accept="video/mp4,video/quicktime,video/webm,video/*" class="hidden">
+
+<!-- Classic scripts (not ES modules) on purpose: modules are blocked over file://,
+     and this app must still demo correctly from a double-clicked file. Load order
+     matters — each file only depends on the ones above it. -->
+<script src="js/util.js"></script>
+<script src="js/db.js"></script>
+<script src="js/video-engine.js"></script>
+<script src="js/project.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/screens.js"></script>
+<script src="js/app.js"></script>
+<script>
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    navigator.serviceWorker.register('service-worker.js').catch(function () { /* non-fatal */ });
+  }
+</script>
+</body>
+</html>
