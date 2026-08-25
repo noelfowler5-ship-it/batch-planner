@@ -1,6 +1,6 @@
 // Bump this string whenever index.html changes — the activate handler deletes every
 // other cache, which is what forces an installed app to pick up the new version.
-const CACHE_NAME = 'batch-planner-v3';
+const CACHE_NAME = 'batch-planner-v4';
 const FILES_TO_CACHE = [
   './',
   './index.html',

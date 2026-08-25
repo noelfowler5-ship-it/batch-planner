@@ -60,9 +60,10 @@ Everything — markup, one `<style>` block, and one big `<script>` — lives in 
 When making changes, search within it rather than expecting a multi-file layout.
 
 **State & persistence**
-- `state` (in-memory) holds `products`, `logs`, `plans`, `settings`, plus UI state
-  (`tab`, `sort`, `subtab`). Loaded from `localStorage` via `K` keys (`ttbp_products`,
-  `ttbp_logs`, `ttbp_plans`, `ttbp_settings`) using `load()`/`save()`/`saveAll()`.
+- `state` (in-memory) holds `products`, `logs`, `plans`, `settings`, `learning`, plus UI
+  state (`tab`, `sort`, `subtab`, `learningChapter`). Loaded from `localStorage` via `K`
+  keys (`ttbp_products`, `ttbp_logs`, `ttbp_plans`, `ttbp_settings`, `ttbp_learning`) using
+  `load()`/`save()`/`saveAll()`.
 - Video **files** (blobs + thumbnails) go in IndexedDB (`ttbp-db` / `videos` store,
   `openDB()`/`idbGet()`/`idbPut()`), not localStorage — that's why `attachFile()` and
   `getThumb()` are async.
@@ -72,9 +73,9 @@ When making changes, search within it rather than expecting a multi-file layout.
 
 **Rendering pattern**
 - No virtual DOM / reactivity. Each tab has a `render<Tab>()` function
-  (`renderPlan`, `renderPerf`, `renderProducts`) that builds an HTML string and sets
-  `innerHTML`. `render()` dispatches on `state.tab`; `switchTab()` toggles visible
-  `#view-*` sections and calls `render()`.
+  (`renderPlan`, `renderPerf`, `renderProducts`, `renderLearning`) that builds an HTML
+  string and sets `innerHTML`. `render()` dispatches on `state.tab`; `switchTab()` toggles
+  visible `#view-*` sections and calls `render()`.
 - All interactivity is a **single delegated click listener** on `document` keyed off
   `data-action` attributes (see the big `switch (a)` around line 1468) — there are no
   per-element `addEventListener` calls in the rendered markup. When adding a new button,
@@ -106,6 +107,17 @@ a plan for a given ISO week (`currentWeekKey()`, `mondayOf()`).
 (`parseCSV`/`mapHeaders`/`COLMAP` fuzzy-matches TikTok's export column names) and, if
 connected, live sync via `ttSync()`/`ttFetch()` hitting the Netlify functions.
 `angleStats()`/`bestAngle()` compute which hook/TOC angle performs best.
+
+**Learning tab**: static course content, not a live integration. `LESSONS` is a constant
+array (chapters → sections → content `blocks` of type `p`/`list`/`table`/`code`/`rule`)
+authored once from the "TikTok Affiliate Masterclass" Google Doc and baked directly into
+`index.html` — the app never calls the Drive API itself. `renderLearningOverview()` shows
+the chapter list with progress; `renderLearningChapter()` shows one chapter's sections in
+full, each with a "mark as read" toggle. Read state is `state.learning`, a flat
+`{sectionId: true}` map, `ttbp_learning` in storage — same offline-first pattern as
+everything else, no new persistence mechanism. To refresh the content from an updated doc,
+re-pull it and replace the `LESSONS` array; there's no sync mechanism to keep them in step
+automatically.
 
 ### Back end: `netlify/functions/*.js` (TikTok integration)
 

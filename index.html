@@ -55,6 +55,7 @@
   <section id="view-plan"></section>
   <section id="view-perf" class="hidden"></section>
   <section id="view-products" class="hidden"></section>
+  <section id="view-learning" class="hidden"></section>
 
   <!-- Kept in the page body, not behind the help button: TikTok's developer review
        requires both links to be visible without opening a menu. -->
@@ -67,7 +68,7 @@
 </main>
 
 <nav id="bottomnav" class="bg-white border-t border-stone-200">
-  <div class="max-w-[480px] mx-auto grid grid-cols-3">
+  <div class="max-w-[480px] mx-auto grid grid-cols-4">
     <button data-tab="plan" class="navbtn tap flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold text-stone-900">
       <span class="text-[19px] leading-none">🗓️</span><span>Plan Week</span>
     </button>
@@ -76,6 +77,9 @@
     </button>
     <button data-tab="products" class="navbtn tap flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold text-stone-400">
       <span class="text-[19px] leading-none">📦</span><span>Products</span>
+    </button>
+    <button data-tab="learning" class="navbtn tap flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold text-stone-400">
+      <span class="text-[19px] leading-none">🎓</span><span>Learning</span>
     </button>
   </div>
 </nav>
@@ -216,19 +220,21 @@ async function idbClear() {
 }
 
 /* ---------------------------- state ---------------------------- */
-const K = { products: 'ttbp_products', logs: 'ttbp_logs', plans: 'ttbp_plans', settings: 'ttbp_settings' };
+const K = { products: 'ttbp_products', logs: 'ttbp_logs', plans: 'ttbp_plans', settings: 'ttbp_settings', learning: 'ttbp_learning' };
 const state = {
   products: load(K.products, []),
   logs:     load(K.logs, []),
   plans:    load(K.plans, {}),
   settings: load(K.settings, { lang: 'bm', week: null, lastImport: null }),
+  learning: load(K.learning, {}),   // sectionId -> true once marked read
   sort:     { key: 'date', dir: 'desc' },
   tab:      'plan',
-  subtab:   {}   // productId -> 'captions' | 'toc'
+  subtab:   {},   // productId -> 'captions' | 'toc'
+  learningChapter: null   // chapterId, or null for the chapter list
 };
 function load(k, dflt) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? dflt : v; } catch (e) { return dflt; } }
 function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast('Storage full — export & clear old data', 'err'); } }
-const saveAll = () => { save(K.products, state.products); save(K.logs, state.logs); save(K.plans, state.plans); save(K.settings, state.settings); };
+const saveAll = () => { save(K.products, state.products); save(K.logs, state.logs); save(K.plans, state.plans); save(K.settings, state.settings); save(K.learning, state.learning); };
 
 const getProduct = (id) => state.products.find(p => p.id === id) || null;
 function getVideo(pid, vid) { const p = getProduct(pid); return p ? (p.videos.find(v => v.id === vid) || null) : null; }
@@ -1149,6 +1155,478 @@ function renderProducts() {
   $('#view-products').innerHTML = h;
   hydrateThumbs();
 }
+/* ---------------------------- learning content ---------------------------- */
+const LESSONS = [
+  {
+    id: 'ch1', num: 1, title: 'Account Foundation',
+    subtitle: 'Technical & Account Foundation',
+    intro: "Before a single viral video matters, your account has to be structurally capable of converting attention into sales, and TikTok's algorithm has to trust it enough to show your content to strangers. This chapter is infrastructure — boring, and non-negotiable.",
+    sections: [
+      {
+        id: 'ch1-1', title: '1.1 Optimizing Bio, CTA, and Link Strategy',
+        blocks: [
+          { p: '**The core decision: Link-in-bio tool vs. TikTok Shop Showcase.**' },
+          { table: {
+            headers: ['', 'Link-in-bio (Linktree, Beacons, etc.)', 'TikTok Shop Showcase (native storefront tab)'],
+            rows: [
+              ['Friction to purchase', 'High — leaves the app, breaks the in-app checkout flow TikTok is optimized to reward', 'Low — one tap, stays in-app, native checkout'],
+              ['Algorithm treatment', 'TikTok actively suppresses reach on videos/profiles that push traffic off-platform', 'Neutral to favorable — TikTok wants Shop transactions to happen in-app'],
+              ['Best use case', 'Cross-platform hub (centralizing links to share on Instagram/WhatsApp/Facebook where Shop isn’t native)', 'Primary CTA for every TikTok video and your profile itself'],
+              ['Attribution', 'You control the destination page but lose native sales tracking', 'Full order/commission tracking inside TikTok Shop Creator tools']
+            ]
+          }},
+          { rule: "If the sale is happening on TikTok, always route through TikTok Shop Showcase, not an external link-in-bio. External links are for repurposing content to other platforms where TikTok Shop links don't work (see 4.3). Mixing the two on your TikTok profile itself dilutes both — pick Showcase as primary, keep the link-in-bio tool as a secondary cross-platform hub only." },
+          { p: '**Bio structure** (character-limited, so every word earns its place):' },
+          { code: '[Niche identity] | [Specific promise/outcome]\n🛒 Tap Shop for [category] I actually use\n[optional: posting cadence or credibility line]' },
+          { p: 'Example skeleton (fill with your niche):' },
+          { code: 'Kitchen tools that actually work 🍳\n🛒 Everything I’ve tested is in Shop\nNew pick every week' },
+          { p: '**Rules for the bio:**' },
+          { list: [
+            'Lead with what you help people **do**, not who you are.',
+            'The CTA line should point at the Shop tab specifically ("Tap Shop," "Shop my picks") — don’t make people guess where to buy.',
+            'Avoid vague CTAs like "check my links" — specificity converts better than mystery.',
+            'Update it whenever your dominant content pillar shifts (see 3.2).'
+          ]}
+        ]
+      },
+      {
+        id: 'ch1-2', title: '1.2 Warming Up the Algorithm Without Triggering Spam Flags',
+        blocks: [
+          { p: 'New or newly-repositioned accounts get a **trust probation period**. TikTok tests your content on small, controlled audience segments before expanding reach. Two failure modes to avoid:' },
+          { list: [
+            '**Posting too much, too fast.** Sudden volume spikes (0 → 5 posts/day) read as spam/bot behavior. Ramp gradually.',
+            '**Off-platform link pushing in captions/bio during the warm-up window.** This is the single most common reach-killer for new affiliate accounts. TikTok wants to keep users in-app; a profile that looks like a redirect funnel gets suppressed before it ever gets a fair shot.'
+          ]},
+          { p: '**A safe 21-day warm-up sequence:**' },
+          { table: {
+            headers: ['Days', 'Action'],
+            rows: [
+              ['1–3', 'Complete profile (bio, PFP, niche-consistent content only). Post 1x/day. Engage genuinely (watch, like, comment) in your niche for 15–20 min/day — this signals your account’s topic cluster to the algorithm.'],
+              ['4–10', 'Post 1x/day consistently at the same time window. No Shop tagging yet if brand new — let the algorithm learn your content topic first.'],
+              ['11–15', 'Introduce TikTok Shop product tags on videos once affiliate access is live (see 1.3). Keep captions native — no external URLs.'],
+              ['16–21', 'Increase to 1–2 posts/day if day 1–15 retention/completion rates are healthy. Monitor Creator Center analytics for reach drop-offs after each new posting behavior — if reach drops sharply after a change, revert and hold steady for 3 days before trying again.']
+            ]
+          }},
+          { p: '**Spam-flag triggers to actively avoid at every stage:**' },
+          { list: [
+            'Identical caption/hashtag blocks copy-pasted across multiple videos in the same session',
+            'Posting the exact same video file twice (TikTok’s duplicate-detection suppresses reposts — always change at least the first 1–3 seconds, per Chapter 3)',
+            'Rapid follow/unfollow or mass-commenting the same phrase across many accounts',
+            'External links in bio/caption during the first 2–3 weeks of a new account'
+          ]}
+        ]
+      },
+      {
+        id: 'ch1-3', title: '1.3 Unlocking TikTok Shop Affiliate Features',
+        blocks: [
+          { p: 'As of 2026, requirements vary by market and TikTok updates thresholds periodically — always verify current numbers in your own Seller/Creator Center before planning around a specific figure. The general shape across most markets:' },
+          { list: [
+            '**Entry tier:** A lower follower threshold (historically as low as 1,000 in many regions) unlocks a pilot/limited tier — you can tag products and earn commission, but often with a daily posting cap on shoppable content.',
+            '**Full Affiliate Creator tier:** A higher threshold (historically 5,000 in mature markets like the US) removes the daily cap and unlocks full Affiliate Center access, including Open Collaboration browsing and applying to Target Collaborations.',
+            'Beyond the raw follower count, TikTok increasingly weights a **creator quality score** — video completion rate, comment-to-view ratio, share rate, posting consistency, and policy compliance. A smaller account with strong quality signals can outperform a larger, inconsistent one for eligibility and for which sellers approach you.'
+          ]},
+          { p: '**Two collaboration models — know both:**' },
+          { list: [
+            '**Open Collaboration:** Any eligible creator can browse the marketplace and self-select products to promote at the seller’s posted commission rate. This is where you start — it’s low-friction and lets you test which products/niches actually convert for your specific audience before committing deeper.',
+            '**Target Collaboration:** The seller invites specific creators directly, often with higher commission rates, free samples, or exclusive product access as an incentive. This is what you graduate into once you have proof (views, conversion rate, GMV) to show sellers — covered fully in 5.2.'
+          ]},
+          { p: '**Action steps to unlock and activate:**' },
+          { list: [
+            'Convert to a Business/Creator account if not already.',
+            'Complete identity verification (ID + bank details for payouts).',
+            'Meet the follower threshold for your market, or enter the pilot tier if available.',
+            'Apply for TikTok Shop Creator access in-app (Profile → Creator Tools → TikTok Shop).',
+            'Once approved, browse the Affiliate Center under Open Collaboration, filtered to your niche category, sorted by commission rate and recent GMV (a proxy for "this product is currently converting for other creators").'
+          ], ordered: true}
+        ]
+      }
+    ],
+    checklist: [
+      'Bio rewritten with clear niche + Shop-tab CTA',
+      'Confirmed Showcase (not external link) is the primary on-profile CTA',
+      'Posting cadence matches your current warm-up stage',
+      'No off-platform links in captions/bio if account is under 3 weeks old',
+      'TikTok Shop Creator access applied for / confirmed active',
+      'Reviewed current follower/eligibility thresholds directly in your Creator Center (don’t rely on outdated numbers from any guide, including this one)'
+    ]
+  },
+  {
+    id: 'ch2', num: 2, title: 'Product Research',
+    subtitle: 'Product Research & Sample Acquisition',
+    intro: "This is the chapter most creators skip, and it's the reason most affiliate accounts top out at RM50–200/month. Content quality without product-economics discipline is just entertainment with extra steps.",
+    sections: [
+      {
+        id: 'ch2-1', title: '2.1 The 5-Point Product Checklist',
+        blocks: [
+          { p: 'Before promoting any product, run it through all five. A product that fails two or more is a time sink regardless of how good your video is.' },
+          { list: [
+            '**Price point sits in the "impulse-but-not-throwaway" zone.** Products roughly RM15–150 convert best on TikTok Shop’s impulse-driven purchase flow. Below that, commission per sale is too thin to matter at volume; above that, buyers hesitate and want more research than a 15-second video can give them.',
+            '**The problem is visually demonstrable in under 10 seconds.** If you can’t show the product solving something on camera almost immediately, TikTok’s format works against you. "Trust me, it’s great" doesn’t convert — "watch this" does.',
+            '**Commission rate is sustainable for the effort required.** Cross-reference category norms (2.2) — a 5% rate on a RM20 item means RM1 per sale before ad spend or your time. Know this number before you film, not after you’ve published.',
+            '**The seller has recent GMV / repeat affiliate activity.** In the Affiliate Center, check whether other creators are actively earning from this product right now. A product with zero recent affiliate GMV is either brand new (higher risk, unproven) or already saturated/dying (declining interest).',
+            '**It fits your account’s existing content cluster.** TikTok’s algorithm distributes based on topic consistency. A skincare account posting one random kitchen gadget video confuses the algorithm’s audience-matching and usually underperforms regardless of the product’s individual quality — this compounds with 1.2’s warm-up logic.'
+          ], ordered: true}
+        ]
+      },
+      {
+        id: 'ch2-2', title: '2.2 Unit Economics: The Math That Determines Whether This Is a Business',
+        blocks: [
+          { p: '**Core formula** (mirrors TikTok’s own creator commission calculation):' },
+          { code: 'Your commission per sale = (Sale price − Refunds) × Commission rate' },
+          { p: '**Category commission benchmarks** (broad 2026 ranges — sellers set the exact rate within TikTok’s guardrails, and it varies by market):' },
+          { table: {
+            headers: ['Category', 'Typical range', 'Notes'],
+            rows: [
+              ['Beauty / skincare / supplements', '15–30%', 'Higher end because repeat-purchase LTV justifies it for sellers'],
+              ['Fashion / accessories', '10–20%', ''],
+              ['Kitchen / home goods', '8–20%', ''],
+              ['Electronics / gadgets', '5–15%', 'Lower margin category for sellers, so lower commission'],
+              ['Targeted Collaboration (invited)', 'Often +5–15% above Open rate', 'Negotiated, see 5.2']
+            ]
+          }},
+          { p: '**The number that actually predicts your income: creator conversion ratio.** Your realistic path to income isn’t "go viral." It’s:' },
+          { code: 'Monthly income = Total video views × Click-through rate to product × Conversion rate × Average order value × Your commission %' },
+          { p: 'Worked example at a modest, realistic (not viral) scale:' },
+          { list: [
+            '50,000 total views across the month (achievable posting consistently at moderate view counts, not requiring virality)',
+            '3% click-through to product page = 1,500 clicks',
+            '3% of clicks convert to purchase (typical affiliate e-commerce range) = 45 orders',
+            'RM40 average order value',
+            '15% commission',
+            '**= 45 × RM40 × 15% = RM270 for the month**'
+          ]},
+          { p: 'This is why volume and consistency compound — one viral video won’t get you to RM10,000/month, but 30 consistent uploads/month across several proven products, each converting modestly, will. Track your own actual CTR and conversion rate from Creator Center data after 4–6 weeks and plug your real numbers into this formula instead of estimates — this becomes the core metric your entire content calendar should optimize toward (expanded in 5.3).' },
+          { rule: 'Never promote a product where you haven’t calculated this math first. "It might go viral" is not a business plan.' }
+        ]
+      },
+      {
+        id: 'ch2-3', title: '2.3 Direct Outreach: Pitching Brands for Free Samples',
+        blocks: [
+          { p: 'Once you have 3–5 published videos and any sales data (even modest), you have leverage most beginners assume they don’t have. Sellers want creators who convert, not creators with the biggest follower count.' },
+          { p: '**Copy-paste outreach script** (adapt bracketed sections):' },
+          { code: "Subject: Product sample request — [Your niche] creator, [X] followers\n\nHi [Seller/Brand name],\n\nI'm [creator handle], I create [niche] content on TikTok focused on\n[specific angle — e.g. \"budget-friendly kitchen tools\" / \"skincare\nfor sensitive skin\"]. My last [X] videos in this category averaged\n[Y] views with a [Z]% engagement rate.\n\nI came across [Product name] in the TikTok Shop Affiliate Center and\nthink it fits my audience well because [one specific, genuine reason\n— not generic flattery].\n\nWould you be open to sending a sample in exchange for an honest\nreview video, tagged through TikTok Shop affiliate at the [current\ncommission %] rate listed? I can share performance data from similar\npast posts if useful.\n\nHappy to also discuss a Target Collaboration rate once we see how\nthe first video performs.\n\n[Your name]\n[TikTok handle / profile link]" },
+          { p: '**Why this works:** it leads with proof (not follower vanity metrics alone), states a specific and genuine reason (not "I love your brand!"), and proposes a low-commitment first step (one video) while explicitly opening the door to a bigger relationship (Target Collaboration) later — which sets up Chapter 5’s negotiation.' },
+          { p: '**Where to send it:** Open Collaboration product pages often list a seller contact option directly in the Affiliate Center; for brands without an obvious in-app contact, their TikTok Shop storefront "About" section or their linked business email works.' }
+        ]
+      }
+    ],
+    checklist: [
+      'Ran the 5-point checklist on every new product before filming',
+      'Calculated commission-per-sale math before committing time to a product',
+      'Logged actual CTR / conversion rate from this week’s posts into your tracking sheet',
+      'Sent at least 1 outreach message to a seller for sample/rate discussion (once you have baseline data)'
+    ]
+  },
+  {
+    id: 'ch3', num: 3, title: 'Content Engine',
+    subtitle: 'The Viral Content Engine',
+    intro: 'This is where most creators start — and where most fail, because hooks without SEO and pillars without economics (Chapter 2) just produce views that don’t convert.',
+    sections: [
+      {
+        id: 'ch3-1', title: '3.1 The 3-Second Hook Framework',
+        blocks: [
+          { p: 'TikTok’s completion-rate signal is decided in the first 1–3 seconds. Ten proven hook formulas, adaptable to any niche — swap the bracketed niche term:' },
+          { list: [
+            '**The Problem Callout:** "If your [niche pain point] does this too, watch this."',
+            '**The Price Shock:** "This [product] is under RM[X] and I’m mad I didn’t find it sooner."',
+            '**The POV:** "POV: you just discovered [product] exists."',
+            '**The Direct Question:** "Why does nobody talk about [product]?"',
+            '**The Contrarian Take:** "Everyone says [common belief] — here’s why that’s wrong."',
+            '**The Before-You-Buy Warning:** "Don’t buy [common product type] until you see this."',
+            '**The Demonstration Cold-Open:** Start mid-action (no talking) — show the product doing the thing in frame 1, caption/voiceover catches up.',
+            '**The Relatable Complaint:** "I’m so tired of [common frustration in niche]."',
+            '**The Numbered Promise:** "3 things I wish I knew before buying [product category]."',
+            '**The Comparison Hook:** "[Product A] vs [Product B] — one of these is actually worth it."'
+          ], ordered: true},
+          { rule: 'Rotate hook types across your Sunday batch (per your existing planning workflow) rather than reusing the same formula on every post — the algorithm and your audience both fatigue on repetition, and testing different hooks against the same product is also your fastest way to learn what your specific audience responds to.' }
+        ]
+      },
+      {
+        id: 'ch3-2', title: '3.2 The 4 Core Content Pillars',
+        blocks: [
+          { p: 'Rotate all four across your posting calendar — a single-pillar account plateaus faster because it stops giving the algorithm (and your audience) variety within a consistent topic.' },
+          { list: [
+            '**Educational** — teach something adjacent to the product without hard-selling first. Builds trust and authority; CTA comes at the end, softer. Example structure: "3 signs your [category] is [problem]" → payoff/solution → product as the answer in the last 3 seconds.',
+            '**Unboxing / Review** — the bread-and-butter format. Show genuine first reaction, test the core claim on camera, be specific about what’s actually good/not-so-good (unbalanced hype reads as an ad and converts worse than a credible, slightly-critical review).',
+            '**Problem–Solution** — open on the pain point (relatable, specific), demonstrate the product resolving it, close on the outcome. This is the highest-converting pillar for impulse categories because it mirrors the actual purchase decision in miniature.',
+            '**Trend Hijacking** — take a currently-trending audio, format, or meme structure and adapt your product into it. Highest reach potential, lowest control — use it to extend distribution of a product you’ve already proven converts via the other three pillars, not to introduce brand-new unproven products.'
+          ]},
+          { p: '**Suggested weekly mix (7 posts):** 2 Problem-Solution, 2 Unboxing/Review, 1–2 Educational, 1–2 Trend Hijack — adjust ratios based on which pillar is converting best in your own data after a month.' }
+        ]
+      },
+      {
+        id: 'ch3-3', title: '3.3 TikTok SEO: Getting Found, Not Just Recommended',
+        blocks: [
+          { p: 'TikTok search behavior has grown substantially — a meaningful share of users now search TikTok directly the way they’d search Google. Optimizing for search is a second, compounding discovery channel on top of the For You feed algorithm.' },
+          { p: '**Where to place keywords:**' },
+          { list: [
+            '**Caption (first line especially):** Lead with the specific product/problem term a searcher would type, not a vague hook. ("Best budget [product type] for [specific use case]" beats "You NEED this")',
+            '**Voiceover / spoken audio:** TikTok’s speech-to-text indexing means saying the keyword phrase out loud (naturally, not robotically) helps searchability — say the product category and the core benefit within the first 5 seconds.',
+            '**Text-on-screen (TOC):** Reinforce the same keyword phrase visually — this also helps sight-impaired/sound-off viewers and further signals topical relevance.',
+            '**Hashtags:** Use 3–5 hashtags mixing one broad category tag, one specific-niche tag, and one problem/use-case tag. Avoid generic mega-tags alone (#fyp, #viral) — they carry little to no targeting signal on their own; pair them with specific, searchable terms instead.'
+          ]},
+          { p: '**Practical TOC + caption + voiceover alignment example** (kitchen-tool style, adapt to any niche):' },
+          { code: 'Hook (0-2s): "Stop cutting like this ❌"\nTOC: "the tool nobody tells you about"\nVO: "if you\'re still doing it this way, you need to see this"\n\nDemo (3-9s): [show product solving it]\nTOC: "[Product] · RM[price]"\nVO: "[one specific benefit stated plainly]"\n\nCTA (10-13s): "link in shop"\nTOC: "tap shop to grab yours"' }
+        ]
+      }
+    ],
+    checklist: [
+      'Rotated at least 3 different hook formulas across this week’s posts',
+      'Hit all 4 content pillars at least once over the week (or intentionally weighted toward the proven best-performer)',
+      'Caption first line contains a specific, searchable keyword phrase',
+      'TOC and voiceover keywords match the caption’s core term (not three different phrasings)'
+    ]
+  },
+  {
+    id: 'ch4', num: 4, title: 'Conversions & Live Selling',
+    subtitle: 'Conversions & Live Selling',
+    intro: 'Views and follows don’t pay the bills — this chapter is about the moment attention becomes a transaction.',
+    sections: [
+      {
+        id: 'ch4-1', title: '4.1 CTA Psychology: Selling Without Sounding Like a Salesman',
+        blocks: [
+          { rule: 'The CTA should feel like the natural next sentence of the demonstration, not an interruption. Viewers can feel the tonal shift when a video switches from "authentic reaction" to "sales pitch" — that shift is what triggers scroll-away and skepticism.' },
+          { p: '**Techniques that reduce sales resistance:**' },
+          { list: [
+            '**Assume the decision, don’t ask for it.** "Grabbed mine already, link’s in shop" outperforms "Should you buy this? Let me know!" — the latter invites hesitation; the former normalizes the purchase as already-happened, low-stakes.',
+            '**Specificity over hype.** "RM29, lasted me 3 weeks of daily use" beats "This changed my life!!" — concrete detail reads as credible; superlatives read as an ad.',
+            '**Address the objection before they think it.** If price is the likely hesitation: "Yes it’s a bit more than the ones at [common cheaper alternative], here’s why I still use this one" — pre-empting objections in-video reduces the silent "too expensive" scroll-away.',
+            '**Urgency should be honest, not manufactured.** Real urgency (actual low stock, a real time-limited seller promo) converts; fake urgency ("selling out fast!!" on every video) trains your audience to ignore your urgency claims entirely.'
+          ]},
+          { p: '**CTA script skeletons** (rotate, don’t repeat the same one every video):' },
+          { code: '"Yours for RM[X] — tap shop, it\'s linked."\n"Already ordered a second one — shop tab has it."\n"If you\'ve been putting this off, don\'t. Link\'s up top."\n"Tap the shop tab before this restocks."' }
+        ]
+      },
+      {
+        id: 'ch4-2', title: '4.2 TikTok LIVE Shopping Setup & Execution',
+        blocks: [
+          { p: '**Eligibility baseline:** Going LIVE at all typically requires a modest follower minimum (historically around 1,000 in many markets, and this can vary by region — verify current numbers in-app) plus an account in good standing with no active violations. Personal accounts generally have fuller LIVE feature access than Business accounts, so check which account type your goals require.' },
+          { p: '**Pre-LIVE checklist:**' },
+          { list: [
+            'Confirm the products you’ll feature are affiliate-tagged and Shop-linked before going live — don’t scramble mid-stream',
+            'Prepare a rough runsheet: which product, in what order, with what talking points and objection-handling per product',
+            'Good, stable lighting and a steady camera position on the actual product — LIVE Shopping lives and dies on the audience being able to see the product clearly, more than on personality',
+            'Have 2–3 products ready, not just one — LIVE viewers often stay if there’s variety, and a single-product LIVE plateaus fast',
+            'Schedule/announce the LIVE in a normal post beforehand to seed initial viewers — a LIVE that opens to zero viewers rarely recovers momentum in time'
+          ]},
+          { p: '**During the LIVE — structure that works:**' },
+          { list: [
+            '**Open with a hook**, same principle as short-form — state clearly and immediately what’s being shown and why it’s worth staying for.',
+            '**Cycle products every 5–10 minutes**, demonstrating live, reading comments aloud, answering objections in real time (this is LIVE’s actual advantage over pre-recorded video — real-time trust-building).',
+            '**Repeat the CTA naturally and often** ("tap the yellow bag," "it’s pinned at the bottom") — LIVE viewers join mid-stream constantly, so don’t assume everyone watching heard the CTA once already.',
+            '**Close with a recap** of what was shown and a final CTA before ending.'
+          ], ordered: true}
+        ]
+      },
+      {
+        id: 'ch4-3', title: '4.3 Repurposing Top Content: Carousels & Cross-Format',
+        blocks: [
+          { p: 'Once a video proves it converts, extend its life instead of only chasing new content:' },
+          { list: [
+            '**Video → Carousel:** Pull 4–6 key frames (the hook moment, the demo action, the result, the price/CTA card) into a TikTok photo carousel. Carousels often get a second, distinct wave of reach separate from your video’s original distribution, and let you re-target the same proven angle to viewers who missed the video.',
+            '**Cross-platform repurposing** (where external link-in-bio tools, from 1.1, become relevant): the same proven video can go to Instagram Reels, Facebook Reels, and WhatsApp Status — since TikTok Shop’s native tag doesn’t carry over, this is exactly the use case for a centralized link-in-bio hub pointing to the same product.'
+          ]}
+        ]
+      }
+    ],
+    checklist: [
+      'Reviewed this week’s CTAs for hype language vs. specific/credible language',
+      'Ran or scheduled at least one LIVE session (once eligible) with a pre-planned product runsheet',
+      'Identified this week’s single best-performing video and repurposed it as a carousel and/or cross-platform post'
+    ]
+  },
+  {
+    id: 'ch5', num: 5, title: 'Scaling',
+    subtitle: 'Scaling with Paid Ads & Partnerships',
+    intro: 'This is the chapter for once organic content has proven a repeatable pattern — paid amplification on unproven content just loses money faster.',
+    sections: [
+      {
+        id: 'ch5-1', title: '5.1 Spark Ads: Amplifying Winning Organic Videos',
+        blocks: [
+          { p: '**What Spark Ads do:** they let you (or the seller, or both) put ad budget behind an already-published organic video, preserving its existing likes/comments/shares (unlike a cold ad creative starting from zero social proof) while extending its reach beyond your organic audience.' },
+          { rule: 'When to Spark an ad: only amplify videos that have already proven themselves organically (above-average completion rate, above-average CTR-to-shop for your account, actual sales attached). Amplifying a mediocre video just gets you more people scrolling past it faster.' },
+          { p: '**Basic Spark Ads workflow:**' },
+          { list: [
+            'Identify your top 10–20% performing video from the last 2–4 weeks (using your own Creator Center data, or your batch-planner’s performance tracking if you’re logging it there).',
+            'Confirm the video is Shop-tagged correctly (the whole point is driving Shop conversions, not just views).',
+            'Set up the Spark Ad through TikTok Ads Manager (or coordinate with the seller if they’re willing to co-fund/run it — sellers increasingly do this for creators who are already converting, since it’s lower-risk ad spend for them too).',
+            'Start with a modest daily budget, measure conversion cost against your actual commission per sale (from 2.2’s math) — if ad spend per sale exceeds your commission per sale, it’s not yet profitable to scale further.',
+            'Kill or iterate quickly on underperformers; scale budget only on ads that are net-profitable after commission.'
+          ], ordered: true}
+        ]
+      },
+      {
+        id: 'ch5-2', title: '5.2 Tiered Commissions & Negotiating Custom Rates (20%+)',
+        blocks: [
+          { p: '**What gives you negotiating leverage:** proof, not follower count. A seller doesn’t care that you have 50,000 followers if you’ve never sold their product category — they care about demonstrated conversion.' },
+          { p: '**What to bring to a negotiation:**' },
+          { list: [
+            'Screenshots of actual sales/GMV you’ve driven (for this seller’s product, or a comparable one in the same category)',
+            'Your average views and engagement rate over a recent, representative period (not your single best outlier video)',
+            'A specific ask, not a vague one'
+          ]},
+          { p: '**Negotiation script** (once you have some sales history):' },
+          { code: "Hi [Seller name],\n\nOver the last [X weeks], I've sold [Y units] of [product] at the\ncurrent [Z%] Open Collaboration rate, generating roughly RM[amount]\nin GMV for you.\n\nI'd like to move to a Target Collaboration at [Z+10-15%] — happy to\ncommit to [specific cadence, e.g. \"2 dedicated videos per month\"] in\nexchange. I can also prioritize [product] over similar items I'm\ncurrently promoting from other sellers if the rate makes sense.\n\nLet me know if that works, or if there's a structure you'd prefer.\n\n[Your name]" },
+          { p: '**Understanding tiered structures:** many sellers, especially in higher-margin categories (beauty, supplements), now offer a hybrid model — a smaller guaranteed flat fee per video plus a commission percentage, rather than commission-only. This is worth proposing yourself once you have leverage: it de-risks your time investment on days when a video underperforms, while the seller still only pays significant money when sales actually happen.' }
+        ]
+      },
+      {
+        id: 'ch5-3', title: '5.3 Tracking Metrics & Troubleshooting Plateaus',
+        blocks: [
+          { p: '**The three metrics that matter most, in order:**' },
+          { list: [
+            '**GMV (Gross Merchandise Value)** — total sales value your content generated. This is the top-line number sellers care about and the one that gives you negotiating leverage.',
+            '**CTR (Click-through rate) to product** — of everyone who saw the video, what % tapped through to the product. Low CTR with high views = hook/interest problem, not a product problem.',
+            '**Conversion rate** — of everyone who clicked through, what % actually purchased. Low conversion with decent CTR = pricing, trust, or product-page problem, not a content problem.'
+          ], ordered: true},
+          { p: '**Diagnostic table for plateaus:**' },
+          { table: {
+            headers: ['Symptom', 'Likely cause', 'Fix'],
+            rows: [
+              ['Views dropping across new posts', 'Algorithm reach suppression (1.2) or content fatigue on repeated formats', 'Audit for off-platform links, repost duplication; rotate hook formulas and pillars (Ch. 3)'],
+              ['High views, low CTR to product', 'Weak or late CTA, or product tag not prominent', 'Move CTA earlier, use clearer product-tag placement, re-test CTA scripts from 4.1'],
+              ['Good CTR, low conversion', 'Price resistance, unclear value, or trust gap', 'Add objection-handling in-video (4.1), check product reviews/rating on the Shop listing itself, reconsider if the product actually passes the 5-point checklist (2.1)'],
+              ['Good conversion, but revenue still low', 'Volume problem, not a quality problem — the funnel works, you just need more videos through it', 'Increase posting frequency/consistency rather than over-optimizing an already-working format'],
+              ['Everything flat for 3+ weeks despite consistent posting', 'Product or niche saturation, or audience-content mismatch', 'Introduce a new product from the 5-point checklist; test a genuinely new pillar/angle rather than a small variation']
+            ]
+          }},
+          { p: '**The habit that compounds all of this:** log GMV, CTR, and conversion rate weekly against what content pillar and hook type produced them. After 8–12 weeks you’ll have your own data-backed playbook — more valuable than any generic guide (including this one), because it reflects your specific niche and audience’s actual behavior.' }
+        ]
+      }
+    ],
+    checklist: [
+      'Identified this week’s top-performing video as a Spark Ads candidate (only if it’s already proven, not speculative)',
+      'Logged GMV / CTR / conversion rate for the week against content pillar and hook type',
+      'If sales history now exists with a given seller, drafted or sent a Target Collaboration / rate negotiation'
+    ]
+  }
+];
+
+/* =========================================================================
+   LEARNING TAB
+   Content pulled from the "TikTok Affiliate Masterclass" Google Doc and
+   restructured here as chapters -> lesson sections, each with a
+   mark-as-read checkbox. Progress lives in localStorage (ttbp_learning),
+   same offline-first pattern as the rest of the app.
+   ========================================================================= */
+function isRead(sid) { return !!state.learning[sid]; }
+function chapterProgress(ch) {
+  const done = ch.sections.filter(s => isRead(s.id)).length;
+  return { done, total: ch.sections.length };
+}
+function learningProgress() {
+  let done = 0, total = 0;
+  LESSONS.forEach(ch => { const p = chapterProgress(ch); done += p.done; total += p.total; });
+  return { done, total };
+}
+function mdBold(s) { return esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>'); }
+
+function renderLearningBlock(b) {
+  if (b.p) return '<p class="text-[13px] leading-relaxed text-stone-700 mb-2.5">' + mdBold(b.p) + '</p>';
+  if (b.rule) {
+    return '<div class="text-[13px] leading-relaxed text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 mb-2.5"><b>The rule —</b> ' + mdBold(b.rule) + '</div>';
+  }
+  if (b.code) {
+    return '<pre class="text-[12px] leading-relaxed bg-stone-900 text-stone-100 rounded-xl p-3 mb-2.5 overflow-x-auto whitespace-pre-wrap font-mono">' + esc(b.code) + '</pre>';
+  }
+  if (b.list) {
+    const tag = b.ordered ? 'ol' : 'ul';
+    const cls = b.ordered ? 'list-decimal' : 'list-disc';
+    return '<' + tag + ' class="' + cls + ' pl-5 text-[13px] leading-relaxed text-stone-700 mb-2.5 space-y-1.5">' +
+      b.list.map(item => '<li>' + mdBold(item) + '</li>').join('') + '</' + tag + '>';
+  }
+  if (b.table) {
+    const t = b.table;
+    let h = '<div class="overflow-x-auto mb-2.5 -mx-1 no-scrollbar"><table class="w-full text-[11.5px] border-collapse">';
+    h += '<thead><tr>' + t.headers.map(x => '<th class="text-left font-bold text-stone-500 border-b border-stone-200 px-1.5 py-1.5 align-bottom whitespace-nowrap">' + esc(x) + '</th>').join('') + '</tr></thead>';
+    h += '<tbody>' + t.rows.map(row =>
+      '<tr>' + row.map(c => '<td class="align-top text-stone-700 border-b border-stone-100 px-1.5 py-1.5 min-w-[120px]">' + mdBold(c) + '</td>').join('') + '</tr>'
+    ).join('') + '</tbody></table></div>';
+    return h;
+  }
+  return '';
+}
+
+function renderLearning() {
+  const chId = state.learningChapter;
+  const ch = chId ? LESSONS.find(c => c.id === chId) : null;
+  if (!ch) { state.learningChapter = null; $('#view-learning').innerHTML = renderLearningOverview(); return; }
+  $('#view-learning').innerHTML = renderLearningChapter(ch);
+}
+
+function renderLearningOverview() {
+  const tp = learningProgress();
+  const pct = tp.total ? Math.round(tp.done / tp.total * 100) : 0;
+  let h = '<div class="bg-white border border-stone-200 rounded-2xl p-4 mb-4">' +
+    '<div class="font-bold text-[15px] mb-0.5">TikTok Affiliate Masterclass</div>' +
+    '<div class="text-[12px] text-stone-500 mb-2.5">' + LESSONS.length + ' chapters · ' + tp.total + ' lessons</div>' +
+    '<div class="h-1.5 bg-stone-200 rounded-full overflow-hidden"><div class="h-full bg-stone-900" style="width:' + pct + '%"></div></div>' +
+    '<div class="text-[11px] text-stone-400 mt-1.5">' + tp.done + ' of ' + tp.total + ' lessons read' + (pct === 100 ? ' — all done 🎉' : '') + '</div>' +
+  '</div>';
+
+  LESSONS.forEach(ch => {
+    const p = chapterProgress(ch);
+    const complete = p.total > 0 && p.done === p.total;
+    h += '<button data-action="open-chapter" data-c="' + ch.id + '" class="tap w-full text-left bg-white border border-stone-200 rounded-2xl p-4 mb-3 flex items-center gap-3">' +
+      '<div class="shrink-0 w-9 h-9 rounded-full flex items-center justify-center font-bold text-[13px] ' + (complete ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-500') + '">' +
+        (complete ? '✓' : ch.num) +
+      '</div>' +
+      '<div class="min-w-0 flex-1">' +
+        '<div class="font-bold text-[14px] leading-snug">' + esc(ch.title) + '</div>' +
+        '<div class="text-[11.5px] text-stone-500 truncate">' + esc(ch.subtitle) + '</div>' +
+        '<div class="text-[11px] mt-0.5 ' + (complete ? 'text-emerald-700 font-semibold' : 'text-stone-400') + '">' + p.done + '/' + p.total + ' lessons read</div>' +
+      '</div>' +
+      '<div class="text-stone-300 text-[16px] shrink-0">›</div>' +
+    '</button>';
+  });
+
+  h += '<p class="text-[11.5px] text-stone-400 text-center mt-2 mb-1 leading-relaxed">Pulled once from the "TikTok Affiliate Masterclass" doc. Your read progress stays on this device, same as everything else here.</p>';
+  return h;
+}
+
+function renderLearningChapter(ch) {
+  const idx = LESSONS.findIndex(c => c.id === ch.id);
+  const next = LESSONS[idx + 1];
+
+  let h = '<button data-action="close-chapter" class="tap text-[13px] font-semibold text-stone-500 mb-3">‹ All chapters</button>';
+  h += '<div class="text-[11px] font-bold text-stone-400 uppercase tracking-wide mb-1">Chapter ' + ch.num + ' of ' + LESSONS.length + '</div>';
+  h += '<h2 class="text-[18px] font-bold leading-tight mb-2">' + esc(ch.title) + '</h2>';
+  h += '<p class="text-[13px] text-stone-600 leading-relaxed mb-4">' + esc(ch.intro) + '</p>';
+
+  ch.sections.forEach(s => {
+    const read = isRead(s.id);
+    h += '<div class="bg-white border ' + (read ? 'border-emerald-200' : 'border-stone-200') + ' rounded-2xl p-4 mb-3">' +
+      '<div class="flex items-start justify-between gap-3 mb-3">' +
+        '<h3 class="font-bold text-[14px] leading-snug">' + esc(s.title) + '</h3>' +
+        '<button data-action="toggle-read" data-s="' + s.id + '" aria-pressed="' + read + '" ' +
+          'class="shrink-0 w-8 h-8 rounded-lg border flex items-center justify-center text-[14px] ' +
+          (read ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-stone-300 text-stone-300') + '">✓</button>' +
+      '</div>' +
+      s.blocks.map(renderLearningBlock).join('') +
+      '<button data-action="toggle-read" data-s="' + s.id + '" class="mt-1 text-[12px] font-semibold ' +
+        (read ? 'text-emerald-700' : 'text-stone-900 underline') + '">' +
+        (read ? '✓ Marked as read' : 'Mark as read') + '</button>' +
+    '</div>';
+  });
+
+  if (ch.checklist && ch.checklist.length) {
+    h += '<div class="bg-stone-50 border border-stone-200 rounded-2xl p-4 mb-3">' +
+      '<div class="font-bold text-[13px] mb-2">Chapter ' + ch.num + ' Weekly Action Checklist</div>' +
+      '<ul class="text-[12.5px] text-stone-600 leading-relaxed space-y-1.5">' +
+        ch.checklist.map(item => '<li class="flex gap-2"><span class="text-stone-400 shrink-0">☐</span><span>' + esc(item) + '</span></li>').join('') +
+      '</ul>' +
+    '</div>';
+  }
+
+  if (next) {
+    h += '<button data-action="open-chapter" data-c="' + next.id + '" class="tap w-full bg-stone-900 text-white rounded-xl font-semibold text-[14px] mt-2">Next: ' + esc(next.title) + ' →</button>';
+  } else {
+    h += '<div class="text-center text-[12px] text-stone-400 mt-4 mb-1 leading-relaxed">🎉 That’s the whole masterclass. Come back any time from the Learning tab to re-read a lesson.</div>';
+  }
+
+  return h;
+}
+
 function captionsPanel(p) {
   const caps = captionsFor(p);
   return '<div class="flex items-center justify-between mb-2">' +
@@ -1474,6 +1952,14 @@ document.addEventListener('click', async (e) => {
 
   switch (a) {
     case 'close-modal': closeModal(); break;
+
+    case 'open-chapter': state.learningChapter = el.dataset.c; window.scrollTo({ top: 0 }); render(); break;
+    case 'close-chapter': state.learningChapter = null; window.scrollTo({ top: 0 }); render(); break;
+    case 'toggle-read': {
+      const sid = el.dataset.s;
+      if (state.learning[sid]) delete state.learning[sid]; else state.learning[sid] = true;
+      save(K.learning, state.learning); render(); break;
+    }
     case 'open-help': helpModal(); break;
 
     case 'week': {
@@ -1620,8 +2106,8 @@ document.addEventListener('click', async (e) => {
       if (!confirm('Step 1 of 2 — delete ALL products, clips, videos, scripts, plans and logs?')) break;
       if (!confirm('Step 2 of 2 — this cannot be undone. Really clear everything?')) break;
       await idbClear();
-      [K.products, K.logs, K.plans, K.settings].forEach(k => localStorage.removeItem(k));
-      state.products = []; state.logs = []; state.plans = {}; state.subtab = {};
+      [K.products, K.logs, K.plans, K.settings, K.learning].forEach(k => localStorage.removeItem(k));
+      state.products = []; state.logs = []; state.plans = {}; state.subtab = {}; state.learning = {}; state.learningChapter = null;
       state.settings = { lang: 'bm', week: ymd(mondayOf(new Date())), lastImport: null };
       for (const k in thumbCache) delete thumbCache[k];
       render(); toast('All data cleared'); break;
@@ -1636,7 +2122,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal
    ========================================================================= */
 function switchTab(tab) {
   state.tab = tab;
-  ['plan', 'perf', 'products'].forEach(t => $('#view-' + t).classList.toggle('hidden', t !== tab));
+  ['plan', 'perf', 'products', 'learning'].forEach(t => $('#view-' + t).classList.toggle('hidden', t !== tab));
   $$('.navbtn').forEach(b => {
     const on = b.dataset.tab === tab;
     b.classList.toggle('text-stone-900', on);
@@ -1648,6 +2134,7 @@ function switchTab(tab) {
 function render() {
   if (state.tab === 'plan') renderPlan();
   else if (state.tab === 'perf') renderPerf();
+  else if (state.tab === 'learning') renderLearning();
   else renderProducts();
 }
 (async function init() {
