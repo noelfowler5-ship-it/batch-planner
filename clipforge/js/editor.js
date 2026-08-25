@@ -75,9 +75,14 @@
 
   /* ------------------------------------------------------------- segments */
 
-  E.newSegment = function (start, end, extra) {
+  /* clipId identifies which of the project's clips this segment cuts —
+     sourceStart/sourceEnd are always LOCAL to that one clip, never a
+     position in the combined multi-clip timeline. See project.js's header
+     comment for how the two timelines relate. */
+  E.newSegment = function (clipId, start, end, extra) {
     return Object.assign({
       id: U.uid('seg'),
+      clipId: clipId,
       sourceStart: U.round(start, 2),
       sourceEnd: U.round(end, 2),
       enabled: true,
@@ -86,24 +91,32 @@
     }, extra || {});
   };
 
-  /* Build the initial cut. With an analysis, one segment per scene and the
-     REMOVE-flagged ones switched off. Without one, a single full-length
-     segment — the untouched clip. */
+  /* Build the initial cut across every clip, in clip order. A clip with an
+     analysis gets one segment per scene, REMOVE-flagged ones switched off;
+     a clip with none yet gets a single full-length segment. Concatenating
+     per-clip segment lists is all multi-clip needs here — E.outputTimeline
+     below turns "an ordered list of cuts, some from different clips" into
+     one continuous finished video without caring which clip any of them
+     came from. */
   E.buildSegments = function (project) {
-    var duration = (project.video && project.video.duration) || 0;
-    var scenes = (project.aiAnalysis && project.aiAnalysis.scenes) || [];
-
-    if (!scenes.length) {
-      return duration > 0 ? [E.newSegment(0, duration, { label: 'Full clip' })] : [];
-    }
-
-    return scenes.map(function (s) {
-      return E.newSegment(s.start, s.end, {
-        purpose: s.purpose,
-        label: s.purpose,
-        enabled: s.editingRecommendation !== 'REMOVE' && s.purpose !== 'REMOVE'
+    var segments = [];
+    (project.clips || []).forEach(function (clip) {
+      var scenes = (clip.analysis && clip.analysis.scenes) || [];
+      if (!scenes.length) {
+        if (clip.duration > 0) {
+          segments.push(E.newSegment(clip.id, 0, clip.duration, { label: clip.name || 'Full clip' }));
+        }
+        return;
+      }
+      scenes.forEach(function (s) {
+        segments.push(E.newSegment(clip.id, s.start, s.end, {
+          purpose: s.purpose,
+          label: s.purpose,
+          enabled: s.editingRecommendation !== 'REMOVE' && s.purpose !== 'REMOVE'
+        }));
       });
     });
+    return segments;
   };
 
   E.ensureSegments = function (project) {
@@ -164,7 +177,7 @@
     if (at - seg.sourceStart < MIN_SEGMENT || seg.sourceEnd - at < MIN_SEGMENT) return false;
 
     E.mark(project);
-    var tail = E.newSegment(at, seg.sourceEnd, {
+    var tail = E.newSegment(seg.clipId, at, seg.sourceEnd, {
       purpose: seg.purpose,
       label: seg.label,
       enabled: seg.enabled
@@ -179,7 +192,8 @@
     var hit = E.find(project, segmentId);
     if (!hit) return false;
     var seg = hit.segment;
-    var duration = (project.video && project.video.duration) || 0;
+    var clip = CF.project.findClip(project, seg.clipId);
+    var duration = (clip && clip.duration) || 0;
 
     var nextStart = seg.sourceStart;
     var nextEnd = seg.sourceEnd;
@@ -223,7 +237,11 @@
     });
   };
 
-  /* Segments with their position in the finished video worked out. */
+  /* Segments with their position in the finished video worked out. Ordering
+     is purely "walk the enabled segments in array order" — a segment from
+     clip 2 sitting after one from clip 1 lands right after it in the output
+     with no gap, exactly like a cut within a single clip would. This is the
+     whole trick that makes multi-clip work without a special case here. */
   E.outputTimeline = function (project) {
     var out = [];
     var cursor = 0;
@@ -231,6 +249,7 @@
       var length = s.sourceEnd - s.sourceStart;
       out.push({
         id: s.id,
+        clipId: s.clipId,
         sourceStart: s.sourceStart,
         sourceEnd: s.sourceEnd,
         outStart: U.round(cursor, 3),
@@ -248,30 +267,37 @@
     return E.outputTimeline(project).duration;
   };
 
-  /* Where a source timestamp ends up in the finished video, or null if that
-     moment was cut. Used when applying AI suggestions, which arrive in source
-     time but must be stored in output time. */
-  E.sourceToOutput = function (project, sourceTime) {
+  /* Where a (clip, source timestamp) ends up in the finished video, or null
+     if that moment was cut. clipId matters: two different clips can share
+     the same local timestamp range (both may have a scene at "0s-3s"), so
+     time alone is not enough to find the right segment once there is more
+     than one clip. Used when applying AI suggestions, which arrive in
+     source time but must be stored in output time. */
+  E.sourceToOutput = function (project, clipId, sourceTime) {
     var tl = E.outputTimeline(project);
     for (var i = 0; i < tl.segments.length; i++) {
       var s = tl.segments[i];
-      if (sourceTime >= s.sourceStart && sourceTime <= s.sourceEnd) {
+      if (s.clipId === clipId && sourceTime >= s.sourceStart && sourceTime <= s.sourceEnd) {
         return U.round(s.outStart + (sourceTime - s.sourceStart), 2);
       }
     }
     return null;
   };
 
-  /* Nearest surviving output time — used so an overlay whose exact moment was
-     cut still lands somewhere sensible instead of being silently dropped. */
-  E.sourceToOutputNearest = function (project, sourceTime) {
-    var exact = E.sourceToOutput(project, sourceTime);
+  /* Nearest surviving output time within the SAME clip — used so an overlay
+     whose exact moment was cut still lands somewhere sensible instead of
+     being silently dropped. Never crosses into another clip's segments:
+     "nearest" only means something within the footage the AI was actually
+     describing. */
+  E.sourceToOutputNearest = function (project, clipId, sourceTime) {
+    var exact = E.sourceToOutput(project, clipId, sourceTime);
     if (exact !== null) return exact;
     var tl = E.outputTimeline(project);
-    if (!tl.segments.length) return null;
+    var own = tl.segments.filter(function (s) { return s.clipId === clipId; });
+    if (!own.length) return null;
     var best = null;
     var bestGap = Infinity;
-    tl.segments.forEach(function (s) {
+    own.forEach(function (s) {
       var gap = sourceTime < s.sourceStart ? s.sourceStart - sourceTime : sourceTime - s.sourceEnd;
       if (gap < bestGap) {
         bestGap = gap;
@@ -279,6 +305,16 @@
       }
     });
     return best === null ? null : U.round(best, 2);
+  };
+
+  /* AI-facing convenience: the AI describes moments in the combined/global
+     timeline spanning every clip (see project.js), never in one clip's own
+     time. This converts a global time straight to an output time in one
+     step, so callers never need to juggle both conversions themselves. */
+  E.globalToOutputNearest = function (project, globalTime) {
+    var loc = CF.project.globalToLocal(project, globalTime);
+    if (!loc) return null;
+    return E.sourceToOutputNearest(project, loc.clipId, loc.localTime);
   };
 
   /* -------------------------------------------------------------- overlays */
@@ -392,9 +428,10 @@
 
   /* ------------------------------------------------------- applying the AI */
 
-  /* Convert one AI overlay (source time) into a stored overlay (output time). */
+  /* Convert one AI overlay (combined/global time) into a stored overlay
+     (output time). */
   E.applyAiOverlay = function (project, aiOverlay) {
-    var start = E.sourceToOutputNearest(project, aiOverlay.start);
+    var start = E.globalToOutputNearest(project, aiOverlay.start);
     if (start === null) return null;
     var length = Math.max(0.6, aiOverlay.end - aiOverlay.start);
     return E.addOverlay(project, {
@@ -421,12 +458,18 @@
     E.mark(project);
 
     E.ensureSegments(project);
-    var scenes = (project.aiAnalysis && project.aiAnalysis.scenes) || [];
-    var byPurpose = {};
-    scenes.forEach(function (s) { byPurpose[s.start + ':' + s.end] = s; });
+    /* Keyed by clip + start + end, not just start/end: two different clips
+       can each have a scene at "0s-3s", and matching on time alone would
+       risk disabling a segment because of the WRONG clip's REMOVE flag. */
+    var byClipAndSpan = {};
+    (project.clips || []).forEach(function (clip) {
+      ((clip.analysis && clip.analysis.scenes) || []).forEach(function (s) {
+        byClipAndSpan[clip.id + ':' + s.start + ':' + s.end] = s;
+      });
+    });
 
     project.edits.segments.forEach(function (seg) {
-      var scene = byPurpose[seg.sourceStart + ':' + seg.sourceEnd];
+      var scene = byClipAndSpan[seg.clipId + ':' + seg.sourceStart + ':' + seg.sourceEnd];
       if (scene && (scene.editingRecommendation === 'REMOVE' || scene.purpose === 'REMOVE') && seg.enabled) {
         if (E.enabledSegments(project).length > 1) {
           seg.enabled = false;
@@ -438,7 +481,7 @@
     var aiOverlays = (project.aiContent && project.aiContent.textOverlays) || [];
     aiOverlays.forEach(function (o) {
       if (E.hasOverlayText(project, o.text)) return;
-      var start = E.sourceToOutputNearest(project, o.start);
+      var start = E.globalToOutputNearest(project, o.start);
       if (start === null) return;
       var length = Math.max(0.6, o.end - o.start);
       var overlay = E.newOverlay({

@@ -20,6 +20,15 @@ see *Needs a hands-on check* at the bottom.
 cover frame, and extracts 6–14 still frames, all on your device. Pick how much
 time you have (3 / 5 / 10 / 20 min); that controls how aggressive the AI gets.
 
+**Multiple clips, one post** — a project can hold up to `CF.MAX_CLIPS` (3)
+clips instead of one — an unboxing, a demo, a result shot — added via **+ Add
+another clip** on the Edit tab. They're treated as one continuous video
+throughout: one combined scene plan, one set of hooks/captions/voiceover
+written for the assembled whole, one policy check, one export. Each clip
+still gets its own AI analysis and its own score (the Plan tab shows both the
+combined average and each clip's own breakdown) — see "How multiple clips
+become one video" below for how that's kept correct.
+
 **Analyse** — sends the *stills* to Gemini and gets back a scene-by-scene plan:
 what each stretch is for (HOOK / PROBLEM / DEMO / BENEFIT / PROOF / RESULT /
 CTA / FILLER / REMOVE), how strong it looks, whether a face is visible, and a
@@ -74,7 +83,7 @@ Browser (all video work is local)
        util.js           pure helpers + constants
        db.js             IndexedDB (projects, videos, AI cache) + fallback
        video-engine.js   probe · thumbnail · frame extraction (canvas)
-       project.js        project record, workflow, migration
+       project.js        project + clips[], local/combined timeline, migration
        ai-schema.js      validate + repair every AI response
        ai-client.js      the only file that touches the network; owns the cache
        editor.js         segments, overlays, undo/redo, source→output mapping
@@ -97,6 +106,51 @@ Netlify Functions (AI only — never video bytes)
 **No framework, no npm, no build step, no database, no user accounts.**
 Vanilla JS in classic `<script>` tags (not ES modules) so the app still runs
 from a double-clicked file.
+
+### How multiple clips become one video
+
+A project holds `clips[]` — an ordered list, each with its own `videoId`
+(the IndexedDB blob it points at), `fingerprint` (its own AI cache key) and
+`analysis` (its own scene plan). Everything downstream is built on two
+timelines, both defined in `project.js`:
+
+- **Local time** — a position within one clip's own footage. This is what
+  `editor.js` segments use (`sourceStart`/`sourceEnd`, plus a `clipId` saying
+  which clip they belong to) and what each clip's own AI analysis speaks in.
+- **Combined (global) time** — a position in the finished, assembled video,
+  as if every clip's footage had been laid end to end. `P.localToGlobal` /
+  `P.globalToLocal` convert between the two using each clip's cumulative
+  duration (`P.clipOffsets`). Content generation and the policy check are
+  shown a `P.combinedAnalysis(project)` — one virtual scene list with every
+  clip's scenes converted to global time — so the AI writes one script for
+  the whole post, never one per clip.
+
+The one thing this makes non-obvious: **two different clips can share the
+same local timestamps** (both might have a scene at "0s–5s"), so anything
+that used to match on time alone had to become clip-aware too —
+`E.sourceToOutput`/`E.sourceToOutputNearest` take a `clipId`, and
+`E.applyAllSafe`'s REMOVE-matching keys on `clipId + start + end`, not just
+`start + end`. `test/run.cjs`'s "two clips sharing identical local
+timestamps" section is a regression test for exactly this.
+
+Export and preview render loops create **one `<video>` element per clip
+actually used** (not one per project) — `X.render`/`CF.preview.open` take a
+map of `{clipId: Blob}`, wait for every clip's metadata to load, then walk
+the enabled segments in order, picking whichever clip's element a segment
+belongs to. Switching clips mid-render is just picking a different
+already-loaded element; nothing needs re-encoding or re-fetching.
+`X.targetSizeFor(project)` frames the canvas against the **first** clip's
+shape — a later clip with different dimensions still renders correctly
+(`drawFrame` reads each segment's own video dimensions at draw time and
+letterboxes/crops into whatever the target is), just fit into clip 1's frame
+rather than its own.
+
+A project saved before multi-clip existed has no `clips` array at all — just
+the old single-video fields directly on the project. `P.normalize()`
+migrates that into a one-entry `clips[]` the first time the project loads,
+preserving the video, its analysis and its score rather than discarding
+them; a segment saved before `clipId` existed is stamped with the migrated
+clip's id so old edits keep working.
 
 ### Why frames, not the video file
 
@@ -273,7 +327,7 @@ installed copies keep serving the old version.
 
 ```
 cd clipforge
-node test/run.cjs      # 317 assertions — browser app
+node test/run.cjs      # 381 assertions — browser app
 node test/server.mjs   #  26 assertions — Netlify proxy helpers
 ```
 
@@ -324,3 +378,14 @@ verified by hand:
    flagged, not just the happy "looks fine" path
 8. An iPhone HEVC `.mov` — some browsers refuse to decode it, and the app should
    say so clearly rather than hang
+9. **Multi-clip export/preview** — add a second and third clip (ideally
+   different resolutions, to actually exercise the "framed against clip 1's
+   shape" fallback in `X.targetSizeFor`), enable segments from more than one,
+   and confirm export/preview switch cleanly between clips at a segment
+   boundary — no frozen frame, no audio glitch, no stall waiting on a second
+   clip's metadata. This is the multi-video-element path the harness cannot
+   drive at all.
+10. **Add another clip mid-session** — from the Edit tab on a real device,
+    confirm the file picker opens, ingest progress shows on the Edit tab (not
+    just Create), and the new clip's segment appears without disturbing the
+    existing ones or their overlays.

@@ -29,7 +29,7 @@
     }
 
     if (st.ingest.active) {
-      html += renderIngestProgress(st.ingest);
+      html += S.renderIngestProgress(st.ingest);
     } else if (st.draft) {
       html += renderDraft(st.draft);
     } else {
@@ -64,7 +64,7 @@
     return h;
   }
 
-  function renderIngestProgress(ingest) {
+  S.renderIngestProgress = function (ingest) {
     var steps = [
       ['probe', 'Reading the video'],
       ['thumb', 'Making a cover frame'],
@@ -94,7 +94,7 @@
     h += '</ul></div>';
     h += '<div class="tiny faint">Longer clips take longer — frames are read one at a time.</div>';
     return h;
-  }
+  };
 
   function renderDraft(draft) {
     var m = draft.meta;
@@ -162,7 +162,7 @@
     h += renderBatchPanel(st);
 
     var sort = st.settings.projectSort || 'recent';
-    var scored = st.projects.filter(function (p) { return typeof p.score === 'number'; });
+    var scored = st.projects.filter(function (p) { return typeof CF.project.combinedScore(p) === 'number'; });
 
     if (scored.length > 1) {
       h += ui.chipRow('sort-projects', [['recent', 'Newest'], ['score', 'Best score']], sort);
@@ -172,9 +172,9 @@
     var list = st.projects.slice();
     if (sort === 'score') {
       list.sort(function (a, b) {
-        var as = typeof a.score === 'number' ? a.score : -1;
-        var bs = typeof b.score === 'number' ? b.score : -1;
-        return bs - as;
+        var as = CF.project.combinedScore(a);
+        var bs = CF.project.combinedScore(b);
+        return (typeof bs === 'number' ? bs : -1) - (typeof as === 'number' ? as : -1);
       });
     }
 
@@ -199,7 +199,7 @@
     }
 
     var pending = st.projects.filter(function (p) {
-      return !p.aiAnalysis && p.videoId && p.frameCount;
+      return !CF.project.allAnalyzed(p) && (p.clips || []).length && (p.clips || []).every(function (c) { return c.frameCount; });
     });
     if (pending.length < 2) return '';
 
@@ -236,10 +236,11 @@
     h += '<div class="small muted mono" style="margin-top:3px">' + U.esc(CF.project.summaryLine(p)) + '</div>';
     h += '<div class="tiny faint" style="margin-top:3px">Added ' + U.esc(U.relativeDay(p.createdAt)) + '</div>';
 
-    if (typeof p.score === 'number') {
-      var verdict = CF.aiSchema.verdictFor(p.score);
-      h += '<div class="tiny" style="margin-top:6px;color:var(--' + scoreColor(p.score) + ')">' +
-        '<b>' + p.score + '/100</b> · ' + U.esc(verdict.label) + '</div>';
+    var pScore = CF.project.combinedScore(p);
+    if (typeof pScore === 'number') {
+      var verdict = CF.aiSchema.verdictFor(pScore);
+      h += '<div class="tiny" style="margin-top:6px;color:var(--' + scoreColor(pScore) + ')">' +
+        '<b>' + pScore + '/100</b> · ' + U.esc(verdict.label) + '</div>';
     } else if (next) {
       h += '<div class="tiny" style="margin-top:6px;color:var(--' +
         (next.tone === 'accent' ? 'accent' : next.tone === 'bad' ? 'bad' : next.tone === 'warn' ? 'warn' : 'faint') +

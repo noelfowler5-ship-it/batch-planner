@@ -16,6 +16,11 @@
     projects: [],
     draft: null,
     ingest: { active: false, step: '', done: 0, total: 0, name: '' },
+    /* Set to a project id while the file picker is open on behalf of
+       "+ Add another clip" on the Edit tab, so onFileChosen (shared with the
+       Create screen's picker) knows to add to that project instead of
+       starting a brand new one. */
+    pendingClipTarget: null,
     objectUrls: [],
 
     /* studio */
@@ -137,8 +142,9 @@
     return CF.db.allProjects().then(function (list) {
       var normalized = list.map(CF.project.normalize).filter(Boolean);
       return Promise.all(normalized.map(function (p) {
-        if (!p.videoId) return Promise.resolve(p);
-        return CF.db.getVideoMeta(p.videoId).then(function (meta) {
+        var firstVideoId = p.clips && p.clips[0] && p.clips[0].videoId;
+        if (!firstVideoId) return Promise.resolve(p);
+        return CF.db.getVideoMeta(firstVideoId).then(function (meta) {
           p._thumb = meta && meta.thumb ? meta.thumb : null;
           return p;
         }).catch(function () { return p; });
@@ -151,16 +157,21 @@
 
   /* --------------------------------------------------------------- ingest */
 
+  /* Shared by both the Create-screen picker and "+ Add another clip" on
+     Edit — returns an error string, or null if the file is fine. */
+  function videoFileProblem(file) {
+    if (!file) return null;
+    if (!U.isVideoFile(file)) return 'That is not a video file';
+    if (file.size > CF.MAX_SENSIBLE_BYTES) {
+      return 'That file is ' + U.bytes(file.size) + ' — too large for the browser to handle reliably';
+    }
+    return null;
+  }
+
   function handleFile(file) {
     if (!file) return;
-    if (!U.isVideoFile(file)) {
-      ui.toast('That is not a video file', 'err');
-      return;
-    }
-    if (file.size > CF.MAX_SENSIBLE_BYTES) {
-      ui.toast('That file is ' + U.bytes(file.size) + ' — too large for the browser to handle reliably', 'err');
-      return;
-    }
+    var problem = videoFileProblem(file);
+    if (problem) { ui.toast(problem, 'err'); return; }
 
     discardDraft();
     state.ingest = { active: true, step: 'probe', done: 0, total: 0, name: file.name || 'video' };
@@ -212,6 +223,79 @@
     state.draft = null;
   }
 
+  /* "+ Add another clip" on the Edit tab — ingests a file exactly like the
+     Create screen does, but appends it to an existing project's clips
+     instead of starting a new draft. Reuses the same #fileInput and the
+     same state.ingest progress indicator (rendered on the Edit tab too when
+     this is what's in flight), so there is only one ingest pipeline to
+     trust, not two. */
+  function handleAddClipFile(file, projectId) {
+    if (!file) return;
+    var project = findProject(projectId);
+    if (!project) return;
+    if (!CF.project.canAddClip(project)) {
+      ui.toast('This project already has ' + CF.MAX_CLIPS + ' clips', 'warn');
+      return;
+    }
+    var problem = videoFileProblem(file);
+    if (problem) { ui.toast(problem, 'err'); return; }
+
+    state.ingest = { active: true, step: 'probe', done: 0, total: 0, name: file.name || 'video' };
+    render();
+
+    CF.video.ingest(file, {
+      onStep: function (step) { state.ingest.step = step; render(); },
+      onFrameProgress: function (done, total) {
+        state.ingest.done = done;
+        state.ingest.total = total;
+        render();
+      }
+    }).then(function (result) {
+      state.ingest.active = false;
+      var videoId = U.uid('vid');
+      CF.editor.mark(project);
+      CF.project.addClip(project, {
+        videoId: videoId,
+        fingerprint: U.videoFingerprint(file, result.meta.duration),
+        name: CF.project.nameFromFile(file),
+        duration: result.meta.duration,
+        width: result.meta.width,
+        height: result.meta.height,
+        size: file.size,
+        type: file.type,
+        frameCount: result.frames.length
+      });
+      var newSeg = CF.editor.newSegment(project.clips[project.clips.length - 1].id, 0, result.meta.duration,
+        { label: CF.project.nameFromFile(file) });
+      project.edits.segments.push(newSeg);
+
+      return CF.db.putVideo({
+        id: videoId,
+        blob: file,
+        thumb: result.thumb,
+        frames: result.frames,
+        name: file.name,
+        type: file.type,
+        size: file.size
+      }).then(function (durable) {
+        if (!durable) ui.toast('Saved for this session only — storage is limited in this browser', 'warn');
+        return commit();
+      }).then(function () {
+        render();
+        if (result.allBlack) {
+          ui.toast('Every frame from that clip came out black — this is a browser decoding problem, not the clip. '
+                 + 'Try Chrome, or re-save the video from your photo app first.', 'err');
+        } else {
+          ui.toast('Clip added — analyse it from the Plan tab to bring it into the scene plan', 'ok');
+        }
+      });
+    }).catch(function (err) {
+      state.ingest.active = false;
+      render();
+      ui.toast(err && err.message ? err.message : 'Could not read that video', 'err');
+    });
+  }
+
   function saveDraft() {
     var draft = state.draft;
     if (!draft) return;
@@ -220,19 +304,19 @@
     var videoId = U.uid('vid');
     var project = CF.project.create({
       name: typed || draft.name,
-      videoId: videoId,
-      fingerprint: draft.fingerprint,
-      frameCount: draft.frames.length,
       timeBudget: draft.timeBudget,
       language: state.settings.language,
-      video: {
+      clips: [{
+        videoId: videoId,
+        fingerprint: draft.fingerprint,
+        name: draft.name,
         duration: draft.meta.duration,
         width: draft.meta.width,
         height: draft.meta.height,
         size: draft.file.size,
         type: draft.file.type,
-        name: draft.file.name
-      }
+        frameCount: draft.frames.length
+      }]
     });
 
     CF.db.putVideo({
@@ -276,15 +360,63 @@
 
   /* Frames live in the video record, not the project, so they are fetched
      only when an analysis actually needs them. */
-  function framesFor(project) {
-    return CF.db.getVideoMeta(project.videoId).then(function (meta) {
+  function framesForClip(clip) {
+    return CF.db.getVideoMeta(clip.videoId).then(function (meta) {
       return (meta && meta.frames) || [];
+    });
+  }
+
+  /* Shared core for "analyse every clip in this project that needs it" —
+     used by both the single-project Plan-tab flow and the multi-project
+     batch mode, so the two never drift on what "analysed" means. Analyses
+     clips one at a time (each is its own AI call, each its own cache entry
+     keyed on that clip's own fingerprint) and only rebuilds the segment cut
+     once every clip is done, so a project with two of three clips analysed
+     never gets a half-built timeline. Rejects on the first error — a quota
+     wall means every remaining clip would fail too, so callers should stop
+     rather than retry the rest. */
+  function analyzeProjectClips(project, force, onClipStart) {
+    var clips = (project.clips || []).filter(function (c) { return force || !c.analysis; });
+    var totalRepairs = 0;
+    var anyFresh = false;
+
+    var chain = clips.reduce(function (p, clip, i) {
+      return p.then(function () {
+        if (onClipStart) onClipStart(i, clips.length, clip);
+        return framesForClip(clip).then(function (frames) {
+          return CF.ai.analyzeVideo({
+            frames: frames,
+            duration: clip.duration,
+            fingerprint: clip.fingerprint,
+            timeBudget: project.timeBudget,
+            faceFree: state.settings.faceFree,
+            model: state.settings.aiModel,
+            force: force
+          });
+        }).then(function (result) {
+          clip.analysis = result.analysis;
+          clip.score = result.analysis.score.overall;
+          project.aiModel = result.model || project.aiModel;
+          if (!result.cached) anyFresh = true;
+          if (result.repairs) totalRepairs += result.repairs.length;
+        });
+      });
+    }, Promise.resolve());
+
+    return chain.then(function () {
+      if (project.status === 'RAW') CF.project.setStatus(project, 'ANALYZING');
+      /* A fresh analysis invalidates a cut built from the old one. */
+      project.edits.segments = CF.editor.buildSegments(project);
+      CF.editor.clearHistory(project.id);
+      return { analyzedCount: clips.length, anyFresh: anyFresh, totalRepairs: totalRepairs };
     });
   }
 
   function runAnalysis(project, force) {
     if (state.aiBusy.active) return;
-    state.aiBusy = { active: true, kind: 'analyze', label: 'Analysing this clip', fraction: 0.15 };
+    var clips = project.clips || [];
+    var multi = clips.length > 1;
+    state.aiBusy = { active: true, kind: 'analyze', label: multi ? 'Analysing clip 1 of ' + clips.length : 'Analysing this clip', fraction: 0.15 };
     render();
 
     var tick = setInterval(function () {
@@ -299,31 +431,19 @@
       state.aiBusy = { active: false, kind: null, label: '', fraction: 0 };
     };
 
-    framesFor(project).then(function (frames) {
-      return CF.ai.analyzeVideo({
-        frames: frames,
-        duration: project.video.duration,
-        fingerprint: project.fingerprint,
-        timeBudget: project.timeBudget,
-        faceFree: state.settings.faceFree,
-        model: state.settings.aiModel,
-        force: force
-      });
+    analyzeProjectClips(project, force, function (i, total, clip) {
+      if (total > 1) {
+        state.aiBusy.label = 'Analysing clip ' + (i + 1) + ' of ' + total + (clip.name ? ' (' + clip.name + ')' : '');
+        render();
+      }
     }).then(function (result) {
       stop();
-      project.aiAnalysis = result.analysis;
-      project.scenes = result.analysis.scenes;
-      project.score = result.analysis.score.overall;
-      project.aiModel = result.model || project.aiModel;
-      if (project.status === 'RAW') CF.project.setStatus(project, 'ANALYZING');
-      /* A fresh analysis invalidates a cut built from the old one. */
-      project.edits.segments = CF.editor.buildSegments(project);
-      CF.editor.clearHistory(project.id);
       return commit().then(function () {
-        if (result.cached) ui.toast('Loaded the saved analysis — no quota used', 'ok');
+        if (!result.analyzedCount) ui.toast('Nothing new to analyse', 'ok');
+        else if (!result.anyFresh) ui.toast('Loaded the saved analysis — no quota used', 'ok');
         else ui.toast('Analysis complete', 'ok');
-        if (result.repairs && result.repairs.length) {
-          ui.toast('Tidied ' + result.repairs.length + ' issue' + (result.repairs.length > 1 ? 's' : '') + ' in the AI response');
+        if (result.totalRepairs) {
+          ui.toast('Tidied ' + result.totalRepairs + ' issue' + (result.totalRepairs > 1 ? 's' : '') + ' in the AI response');
         }
       });
     }).catch(function (err) {
@@ -335,7 +455,7 @@
 
   function runGeneration(project, force) {
     if (state.aiBusy.active) return;
-    if (!project.aiAnalysis) { ui.toast('Analyse the clip first', 'warn'); return; }
+    if (!CF.project.allAnalyzed(project)) { ui.toast('Analyse the clip first', 'warn'); return; }
 
     state.aiBusy = { active: true, kind: 'generate', label: 'Writing hooks, script and captions', fraction: 0.15 };
     render();
@@ -349,10 +469,13 @@
       state.aiBusy = { active: false, kind: null, label: '', fraction: 0 };
     };
 
+    /* One combined analysis spanning every clip, scene times converted to
+       the combined/global timeline — see project.js. The AI writes one
+       script for the finished, assembled video, never one per clip. */
     CF.ai.generateContent({
-      analysis: project.aiAnalysis,
-      duration: project.video.duration,
-      fingerprint: project.fingerprint,
+      analysis: CF.project.combinedAnalysis(project),
+      duration: CF.project.combinedDuration(project),
+      fingerprint: CF.project.combinedFingerprint(project),
       language: project.language,
       timeBudget: project.timeBudget,
       model: state.settings.aiModel,
@@ -401,11 +524,15 @@
       state.aiBusy = { active: false, kind: null, label: '', fraction: 0 };
     };
 
-    framesFor(project).then(function (frames) {
+    /* One check on the finished, assembled video — matches how it will
+       actually be posted — rather than one per clip. Frames from every clip
+       are interleaved so the server's cap on how many it accepts does not
+       leave a later clip with zero representation. */
+    Promise.all((project.clips || []).map(framesForClip)).then(function (perClip) {
       return CF.ai.checkPolicy({
-        frames: frames,
-        duration: project.video.duration,
-        fingerprint: project.fingerprint,
+        frames: U.interleave(perClip),
+        duration: CF.project.combinedDuration(project),
+        fingerprint: CF.project.combinedFingerprint(project),
         content: project.aiContent,
         language: project.language,
         model: state.settings.aiModel,
@@ -469,7 +596,7 @@
   function runBatch() {
     if (state.batch.active) return;
     var pending = state.projects.filter(function (p) {
-      return !p.aiAnalysis && p.videoId && p.frameCount;
+      return !CF.project.allAnalyzed(p) && (p.clips || []).length && (p.clips || []).every(function (c) { return c.frameCount; });
     });
     if (!pending.length) { ui.toast('Nothing left to analyse', 'warn'); return; }
 
@@ -497,22 +624,12 @@
       state.batch.label = project.name;
       render();
 
-      return framesFor(project).then(function (frames) {
-        return CF.ai.analyzeVideo({
-          frames: frames,
-          duration: project.video.duration,
-          fingerprint: project.fingerprint,
-          timeBudget: project.timeBudget,
-          faceFree: state.settings.faceFree,
-          model: state.settings.aiModel
-        });
-      }).then(function (result) {
-        project.aiAnalysis = result.analysis;
-        project.scenes = result.analysis.scenes;
-        project.score = result.analysis.score.overall;
-        project.aiModel = result.model || project.aiModel;
-        if (project.status === 'RAW') CF.project.setStatus(project, 'ANALYZING');
-        project.edits.segments = CF.editor.buildSegments(project);
+      /* Same shared core the Plan-tab flow uses (analyzeProjectClips), so
+         batch mode and a manual "Analyse" can never disagree about what
+         counts as done. force is always false here — batch mode exists to
+         fill in what's missing cheaply, never to spend quota re-doing
+         clips that already have a result. */
+      return analyzeProjectClips(project, false).then(function () {
         return persist(project);
       }).catch(function (err) {
         failures++;
@@ -542,11 +659,23 @@
     state.exportBusy = { active: true, label: 'Preparing', fraction: 0 };
     render();
 
-    CF.db.getVideo(project.videoId).then(function (rec) {
-      if (!rec || !rec.blob) {
-        throw new Error('The source video is not available in this browser session. Re-add the clip to export it.');
+    var clipIds = [];
+    CF.editor.outputTimeline(project).segments.forEach(function (s) {
+      if (clipIds.indexOf(s.clipId) < 0) clipIds.push(s.clipId);
+    });
+
+    Promise.all(clipIds.map(function (id) {
+      var clip = CF.project.findClip(project, id);
+      return clip && clip.videoId ? CF.db.getVideo(clip.videoId) : null;
+    })).then(function (recs) {
+      var blobs = {};
+      for (var i = 0; i < clipIds.length; i++) {
+        if (!recs[i] || !recs[i].blob) {
+          throw new Error('One of this project\'s clips is not available in this browser session. Re-add it to export.');
+        }
+        blobs[clipIds[i]] = recs[i].blob;
       }
-      return CF.exporter.render(project, rec.blob, {
+      return CF.exporter.render(project, blobs, {
         signal: state.exportSignal,
         onProgress: function (fraction, label) {
           state.exportBusy.fraction = fraction;
@@ -854,23 +983,17 @@
         }
         break;
       case 'cut-scene':
-        if (project && project.aiAnalysis) {
-          var scene = project.aiAnalysis.scenes[Number(el.dataset.idx)];
-          if (scene) {
-            CF.editor.ensureSegments(project);
-            var match = project.edits.segments.filter(function (s) {
-              return s.sourceStart === scene.start && s.sourceEnd === scene.end;
-            })[0];
-            if (match && match.enabled) {
-              if (CF.editor.toggleSegment(project, match.id)) {
-                commit();
-                ui.toast('Scene switched off');
-              } else {
-                ui.toast('That is the only scene left switched on', 'warn');
-              }
+        if (project && el.dataset.sid) {
+          var cutHit = CF.editor.find(project, el.dataset.sid);
+          if (cutHit && cutHit.segment.enabled) {
+            if (CF.editor.toggleSegment(project, el.dataset.sid)) {
+              commit();
+              ui.toast('Scene switched off');
             } else {
-              ui.toast('Already switched off');
+              ui.toast('That is the only scene left switched on', 'warn');
             }
+          } else {
+            ui.toast('Already switched off');
           }
         }
         break;
@@ -900,6 +1023,17 @@
         break;
       case 'reset-segments':
         if (project) { CF.editor.resetToAi(project); commit(); ui.toast('Reset to the AI cut'); }
+        break;
+      case 'add-clip':
+        if (project) {
+          if (!CF.project.canAddClip(project)) {
+            ui.toast('This project already has ' + CF.MAX_CLIPS + ' clips', 'warn');
+            break;
+          }
+          state.pendingClipTarget = project.id;
+          var addInput = ui.$('#fileInput');
+          if (addInput) addInput.click();
+        }
         break;
       case 'set-crop':
         if (project && CF.editor.setCrop(project, value)) commit();
@@ -979,7 +1113,9 @@
   function deleteProject(id) {
     var target = findProject(id);
     if (!target) return;
-    var work = target.videoId ? CF.db.deleteVideo(target.videoId) : Promise.resolve();
+    var work = Promise.all((target.clips || []).map(function (c) {
+      return c.videoId ? CF.db.deleteVideo(c.videoId) : null;
+    }));
     work.then(function () {
       return CF.db.deleteProject(id);
     }).then(function () {
@@ -1012,7 +1148,12 @@
 
   function onFileChosen(e) {
     var files = e.target && e.target.files;
-    if (files && files.length) handleFile(files[0]);
+    var target = state.pendingClipTarget;
+    state.pendingClipTarget = null;
+    if (files && files.length) {
+      if (target) handleAddClipFile(files[0], target);
+      else handleFile(files[0]);
+    }
     if (e.target) e.target.value = '';
   }
 

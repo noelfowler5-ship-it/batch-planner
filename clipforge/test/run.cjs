@@ -59,7 +59,8 @@ ok(CF.video.peakLumaFrom(null) === null, 'null pixels read as unknown, not as bl
 section('project — shape, defaults, migration');
 var p = CF.project.create({ name: 'Chopper' });
 ok(p.status === 'RAW', 'a new project starts at RAW');
-ok(p.aiAnalysis === null && p.aiContent === null, 'AI fields are null, not undefined');
+ok(Array.isArray(p.clips) && p.clips.length === 0, 'a new project starts with no clips, not undefined');
+ok(p.aiContent === null, 'AI content is null, not undefined');
 ok(p.edits && Array.isArray(p.edits.segments), 'edits is an object with a segments array');
 ok(CF.project.nameFromFile({ name: 'chopper_final_v2.MP4' }) === 'Chopper final v2', 'name derived from filename');
 var old = CF.project.normalize({ id: 'x1', name: 'Legacy', status: 'BOGUS', edits: [] });
@@ -70,6 +71,72 @@ ok(old.edits.crop === '9:16', 'the migrated project gets the default crop');
 ok(CF.project.normalize(null) === null, 'normalize(null) does not throw');
 ok(CF.project.nextStatus('RAW') === 'ANALYZING', 'RAW advances to ANALYZING');
 ok(CF.project.nextStatus('POSTED') === null, 'POSTED is terminal');
+
+section('project — migrating a pre-multi-clip project (real user data on upgrade)');
+/* Exactly the shape a project had before clips[] existed: single-video
+   fields directly on the project, no clips array at all. */
+var legacy = CF.project.normalize({
+  id: 'legacy1', name: 'Old chopper project', status: 'EDITING',
+  videoId: 'v_old', fingerprint: 'fp_old', frameCount: 8, score: 72,
+  video: { duration: 15, width: 1080, height: 1920, size: 5000, type: 'video/mp4', name: 'chopper.mp4' },
+  aiAnalysis: {
+    video: { product: 'Chopper', description: 'x' },
+    score: { overall: 72 },
+    scenes: [{ start: 0, end: 15, purpose: 'DEMO', description: 'd', visualStrength: 5, editingRecommendation: 'KEEP' }]
+  },
+  edits: { segments: [{ id: 'seg1', sourceStart: 0, sourceEnd: 15, enabled: true }], crop: '9:16', muted: false }
+});
+ok(legacy.clips.length === 1, 'the single video becomes exactly one clip');
+ok(legacy.clips[0].videoId === 'v_old', 'the videoId is preserved');
+ok(legacy.clips[0].fingerprint === 'fp_old', 'the fingerprint is preserved — the analyze cache entry is not orphaned');
+ok(legacy.clips[0].duration === 15 && legacy.clips[0].width === 1080, 'video metadata is preserved');
+ok(legacy.clips[0].frameCount === 8, 'the frame count is preserved');
+ok(legacy.clips[0].analysis && legacy.clips[0].analysis.scenes.length === 1, 'the AI analysis is preserved, not discarded');
+ok(legacy.clips[0].score === 72, 'the score is preserved');
+ok(legacy.edits.segments[0].clipId === legacy.clips[0].id,
+   'a segment saved before multi-clip existed is stamped with the migrated clip\\'s id');
+ok(CF.project.combinedDuration(legacy) === 15, 'combined duration matches the single clip');
+var noVideo = CF.project.normalize({ id: 'x2', name: 'Empty draft', status: 'RAW' });
+ok(Array.isArray(noVideo.clips) && noVideo.clips.length === 0,
+   'a project with no video at all (never got that far) migrates to an empty clip list, not a crash');
+
+section('project — combined/global timeline across several clips');
+var multi = CF.project.create({ name: 'Multi' });
+CF.project.addClip(multi, { videoId: 'va', fingerprint: 'fa', name: 'Unboxing', duration: 10 });
+CF.project.addClip(multi, { videoId: 'vb', fingerprint: 'fb', name: 'Demo', duration: 8 });
+CF.project.addClip(multi, { videoId: 'vc', fingerprint: 'fc', name: 'Result', duration: 6 });
+ok(multi.clips.length === 3, 'three clips were added');
+ok(CF.project.combinedDuration(multi) === 24, 'combined duration is the sum of all three');
+ok(CF.project.isMultiClip(multi) === true, 'a 3-clip project is reported as multi-clip');
+var offsets = CF.project.clipOffsets(multi);
+ok(offsets[multi.clips[0].id] === 0, 'the first clip starts at offset 0');
+ok(offsets[multi.clips[1].id] === 10, 'the second clip starts right after the first');
+ok(offsets[multi.clips[2].id] === 18, 'the third clip starts after the first two');
+ok(CF.project.localToGlobal(multi, multi.clips[1].id, 2) === 12, 'a moment 2s into clip 2 is 12s in the combined timeline');
+ok(CF.project.localToGlobal(multi, multi.clips[2].id, 0) === 18, 'the start of clip 3 lands right where clip 2 ends');
+var backA = CF.project.globalToLocal(multi, 12);
+ok(backA.clipId === multi.clips[1].id && backA.localTime === 2, 'a combined time inside clip 2 maps back to (clip 2, 2s)');
+var backB = CF.project.globalToLocal(multi, 0);
+ok(backB.clipId === multi.clips[0].id && backB.localTime === 0, 'time 0 maps to the very start of clip 1');
+var backEnd = CF.project.globalToLocal(multi, 999);
+ok(backEnd.clipId === multi.clips[2].id, 'a time past the end clamps into the last clip rather than returning null');
+ok(CF.project.canAddClip(multi) === false, 'a 3-clip project is already at CF.MAX_CLIPS and refuses a 4th');
+ok(CF.project.addClip(multi, { videoId: 'vd', duration: 5 }) === null, 'addClip actually refuses past the cap, not just canAddClip');
+ok(multi.clips.length === 3, 'the 4th clip was not silently added');
+
+section('project — combinedAnalysis describes every clip in one virtual scene list');
+multi.clips[0].analysis = { video: { product: 'Chopper', description: 'unboxing it' },
+  scenes: [{ start: 0, end: 4, purpose: 'HOOK', description: 'opening the box' }] };
+multi.clips[1].analysis = { video: { product: 'Chopper', description: 'using it' },
+  scenes: [{ start: 0, end: 8, purpose: 'DEMO', description: 'chopping an onion' }] };
+var combo = CF.project.combinedAnalysis(multi);
+ok(combo.scenes.length === 2, 'scenes from both analysed clips are present (clip 3 has none yet)');
+ok(combo.scenes[0].start === 0 && combo.scenes[0].end === 4, 'clip 1\\'s scene keeps its own timing (offset 0)');
+ok(combo.scenes[1].start === 10 && combo.scenes[1].end === 18,
+   'clip 2\\'s scene is shifted by clip 1\\'s 10s duration — this is what the AI is shown, one continuous video');
+ok(/Clip 2/.test(combo.scenes[1].description), 'a multi-clip scene description says which clip it is from');
+ok(combo.video.description.indexOf('unboxing it') >= 0 && combo.video.description.indexOf('using it') >= 0,
+   'the combined description mentions both clips');
 `);
 
 /* ============================ AI response validation ==================== */
@@ -293,12 +360,27 @@ ok(CF.aiSchema.riskBand('garbage').tone === 'good', 'an unrecognised value falls
 
 app.run(`
 /* Shared fixture: a project carrying a complete, already-validated AI result. */
+/* A single-clip project. Global (combined-timeline) time and the clip's own
+   local time are identical here, since there is only one clip and it starts
+   at offset 0 — exactly like it worked before multi-clip existed. */
+/* A bare single-clip project with no analysis — the shape a project has
+   right after upload, before "Analyse" is ever pressed. */
+function singleClipProject(name, duration) {
+  return CF.project.create({
+    name: name,
+    clips: [{ videoId: 'v_' + name, fingerprint: 'fp_' + name, name: name, duration: duration }]
+  });
+}
+
 function demoProject() {
   var proj = CF.project.create({
-    name: 'Demo', videoId: 'v1', fingerprint: 'fp_demo',
-    video: { duration: 20, width: 1080, height: 1920, size: 1000, type: 'video/mp4', name: 'c.mp4' }
+    name: 'Demo',
+    clips: [{
+      videoId: 'v1', fingerprint: 'fp_demo', name: 'c.mp4',
+      duration: 20, width: 1080, height: 1920, size: 1000, type: 'video/mp4'
+    }]
   });
-  proj.aiAnalysis = {
+  proj.clips[0].analysis = {
     video: { duration: 20, description: 'd', product: 'p', category: 'k' },
     score: { overall: 80, hook: 16, productClarity: 16, demonstration: 16, payoff: 16, ctaPotential: 16 },
     verdict: 'MAKE', recommendedStructure: ['HOOK', 'DEMO'],
@@ -311,6 +393,7 @@ function demoProject() {
         faceDetected: true, voiceoverRecommended: false, textRecommended: false, editingRecommendation: 'REMOVE', reason: 'weak' }
     ]
   };
+  proj.clips[0].score = 80;
   proj.aiContent = {
     language: 'bm',
     hooks: [{ id: 'h1', style: 'curiosity', text: 'Kenapa baru tahu?' }],
@@ -326,7 +409,6 @@ function demoProject() {
       { id: 'o2', text: 'Cut section text', start: 14, end: 17, position: 'top', style: 'proof', animation: 'fade' }
     ]
   };
-  proj.score = 80;
   CF.editor.clearHistory(proj.id);
   CF.editor.ensureSegments(proj);
   return proj;
@@ -340,18 +422,21 @@ ok(CF.editor.enabledSegments(e1).length === 2, 'two segments are live');
 ok(CF.editor.outputDuration(e1) === 12, 'output duration excludes the disabled scene');
 
 section('editor — a project with no analysis still edits');
-var bare = CF.project.create({ name: 'Bare', video: { duration: 9 } });
+var bare = singleClipProject('Bare', 9);
 CF.editor.ensureSegments(bare);
 ok(bare.edits.segments.length === 1, 'no analysis means one full-length segment');
 ok(CF.editor.outputDuration(bare) === 9, 'the untouched clip is the whole clip');
 
 section('editor — source time maps to output time');
 var e2 = demoProject();
-ok(CF.editor.sourceToOutput(e2, 6) === 6, 'a moment before any cut keeps its time');
-ok(CF.editor.sourceToOutput(e2, 15) === null, 'a moment inside a disabled segment has no output time');
-ok(CF.editor.sourceToOutputNearest(e2, 15) !== null, 'nearest-match still finds a home for it');
+var e2clip = e2.clips[0].id;
+ok(CF.editor.sourceToOutput(e2, e2clip, 6) === 6, 'a moment before any cut keeps its time');
+ok(CF.editor.sourceToOutput(e2, e2clip, 15) === null, 'a moment inside a disabled segment has no output time');
+ok(CF.editor.sourceToOutputNearest(e2, e2clip, 15) !== null, 'nearest-match still finds a home for it');
+ok(CF.editor.sourceToOutput(e2, 'some-other-clip', 6) === null,
+   'the same local time in a DIFFERENT clip is not confused for a match');
 CF.editor.toggleSegment(e2, e2.edits.segments[0].id);
-ok(CF.editor.sourceToOutput(e2, 6) === 1, 'cutting the 5s opener shifts everything 5s earlier');
+ok(CF.editor.sourceToOutput(e2, e2clip, 6) === 1, 'cutting the 5s opener shifts everything 5s earlier');
 
 section('editor — guard rails');
 var e3 = demoProject();
@@ -359,7 +444,7 @@ CF.editor.toggleSegment(e3, e3.edits.segments[0].id);
 ok(CF.editor.enabledSegments(e3).length === 1, 'now one segment is live');
 ok(CF.editor.toggleSegment(e3, e3.edits.segments[1].id) === false,
    'the last enabled segment refuses to switch off — an empty export is never reached silently');
-var single = CF.project.create({ name: 'S', video: { duration: 5 } });
+var single = singleClipProject('S', 5);
 CF.editor.ensureSegments(single);
 ok(CF.editor.deleteSegment(single, single.edits.segments[0].id) === false, 'the only segment cannot be deleted');
 
@@ -397,8 +482,8 @@ section('editor — the source video is never touched');
 var e7 = demoProject();
 CF.editor.trimSegment(e7, e7.edits.segments[0].id, 'start', 1);
 CF.editor.deleteSegment(e7, e7.edits.segments[1].id);
-ok(e7.video.duration === 20, 'the recorded source duration is unchanged after editing');
-ok(e7.videoId === 'v1', 'the project still points at the same untouched video record');
+ok(e7.clips[0].duration === 20, 'the recorded source duration is unchanged after editing');
+ok(e7.clips[0].videoId === 'v1', 'the project still points at the same untouched video record');
 
 section('editor — overlays live on the output timeline');
 var e8 = demoProject();
@@ -423,6 +508,76 @@ var again = CF.editor.applyAllSafe(e9);
 ok(again.overlaysAdded === 0, 'applying twice does not duplicate overlays');
 ok(CF.editor.canUndo(e9) === true, 'apply-all is undoable');
 
+section('editor — multi-clip: two clips sharing identical local timestamps are never confused');
+/* The sharpest regression risk in supporting several clips: clip A and clip
+   B can each have a scene at "0s-5s". Everything that used to match on time
+   alone (REMOVE-disabling, AI overlay placement) must match on (clip, time)
+   instead, or a suggestion meant for one clip could land on, or disable,
+   the wrong one. */
+function twoClipProject() {
+  var proj = CF.project.create({ name: 'Two clips' });
+  CF.project.addClip(proj, { videoId: 'vA', fingerprint: 'fA', name: 'Unboxing', duration: 10 });
+  CF.project.addClip(proj, { videoId: 'vB', fingerprint: 'fB', name: 'Demo', duration: 10 });
+  var a = proj.clips[0], b = proj.clips[1];
+  a.analysis = {
+    video: { product: 'Chopper', description: 'unboxing' },
+    score: { overall: 70, hook: 14, productClarity: 14, demonstration: 14, payoff: 14, ctaPotential: 14 },
+    scenes: [
+      { id: 'a1', start: 0, end: 5, purpose: 'HOOK', description: 'box', visualStrength: 8,
+        editingRecommendation: 'KEEP', faceDetected: false, voiceoverRecommended: false, textRecommended: false, reason: '' },
+      { id: 'a2', start: 5, end: 10, purpose: 'FILLER', description: 'boring A', visualStrength: 1,
+        editingRecommendation: 'REMOVE', faceDetected: false, voiceoverRecommended: false, textRecommended: false, reason: 'weak' }
+    ]
+  };
+  b.analysis = {
+    video: { product: 'Chopper', description: 'demo' },
+    score: { overall: 90, hook: 18, productClarity: 18, demonstration: 18, payoff: 18, ctaPotential: 18 },
+    scenes: [
+      /* Same 0-5s / 5-10s local timestamps as clip A, opposite REMOVE flag —
+         if matching ever falls back to time-only, this is where it shows. */
+      { id: 'b1', start: 0, end: 5, purpose: 'DEMO', description: 'chopping', visualStrength: 9,
+        editingRecommendation: 'KEEP', faceDetected: false, voiceoverRecommended: false, textRecommended: false, reason: '' },
+      { id: 'b2', start: 5, end: 10, purpose: 'RESULT', description: 'result shot', visualStrength: 9,
+        editingRecommendation: 'KEEP', faceDetected: false, voiceoverRecommended: false, textRecommended: false, reason: '' }
+    ]
+  };
+  proj.aiContent = {
+    language: 'bm', hooks: [], captions: [],
+    voiceovers: { short: { segments: [] }, medium: { segments: [] }, full: { segments: [] } },
+    textOverlays: [
+      /* Global time 12-15s = 2s into clip B (offset 10) — must land on
+         clip B's segment, never on clip A's identically-timed 2-5s span. */
+      { id: 'mo1', text: 'Clip B overlay', start: 12, end: 15, position: 'center', style: 'benefit', animation: 'fade' }
+    ]
+  };
+  CF.editor.clearHistory(proj.id);
+  CF.editor.ensureSegments(proj);
+  return proj;
+}
+
+var tc = twoClipProject();
+ok(tc.edits.segments.length === 4, 'one segment per scene across both clips');
+ok(tc.edits.segments[0].clipId === tc.clips[0].id && tc.edits.segments[2].clipId === tc.clips[1].id,
+   'segments are correctly attributed to their own clip, in clip order');
+ok(tc.edits.segments[1].enabled === false, 'clip A\\'s weak 5-10s scene starts switched off');
+ok(tc.edits.segments[3].enabled === true, 'clip B\\'s 5-10s scene (a RESULT shot) stays on, despite sharing A\\'s timestamps');
+
+/* buildSegments already disabled clip A's REMOVE scene at construction time,
+   so re-enable it by hand first — simulating a user who switched it back on
+   — to actually exercise apply-all's own REMOVE-matching rather than find
+   nothing left to do. */
+tc.edits.segments[1].enabled = true;
+var tcApplied = CF.editor.applyAllSafe(tc);
+ok(tcApplied.segmentsDisabled === 1, 'exactly one segment was disabled — clip B\\'s look-alike scene was not touched');
+ok(CF.editor.enabledSegments(tc).some(function (s) { return s.clipId === tc.clips[1].id && s.sourceStart === 5; }),
+   'clip B\\'s 5-10s segment is still enabled after apply-all');
+
+var tcTimeline = CF.editor.outputTimeline(tc);
+ok(tcTimeline.duration === 15, 'output duration is 5 (clip A) + 10 (clip B) after clip A\\'s weak scene is cut');
+var placed = tc.textOverlays.filter(function (o) { return o.text === 'Clip B overlay'; })[0];
+ok(!!placed, 'the AI overlay (written in combined/global time) was applied');
+ok(placed.start >= 5 && placed.start < 15, 'it lands in clip B\\'s stretch of the output, not clip A\\'s identically-timed scene');
+
 section('editor — overlap warnings surface rather than silently rewrite');
 var e10 = demoProject();
 CF.editor.addOverlay(e10, { text: 'First', start: 1, end: 5 });
@@ -439,7 +594,7 @@ ok(e11.textOverlays.length === 0, 'the project now has no overlays');
 ok(CF.editor.canUndo(e11) === true, 'clearing is a single undoable step');
 CF.editor.undo(e11);
 ok(e11.textOverlays.length === 2, 'undo brings the whole batch back at once, not one at a time');
-ok(CF.editor.clearOverlays(CF.project.create({ name: 'x', video: { duration: 5 } })) === false,
+ok(CF.editor.clearOverlays(singleClipProject('x', 5)) === false,
    'clearing an already-empty overlay list is a no-op, not a wasted undo step');
 
 section('editor — setHookOverlay: trying different hooks replaces, never stacks (regression)');
@@ -468,6 +623,17 @@ ok(CF.exporter.fileName({ name: "Sara's Chopper! v2" }, 'mp4') === 'sara-s-chopp
 ok(CF.exporter.fileName({ name: '' }, 'webm') === 'clipforge.webm', 'a blank name falls back');
 ok(CF.exporter.extensionFor('video/webm;codecs=vp9') === 'webm', 'webm is detected');
 ok(CF.exporter.extensionFor('video/mp4;codecs=avc1') === 'mp4', 'mp4 is detected');
+
+section('exporter — target canvas size follows the first clip, shared with preview');
+var sizeDefault = CF.exporter.targetSizeFor({ edits: { crop: '9:16' }, clips: [{ width: 720, height: 1280 }] });
+ok(sizeDefault.w === 1080 && sizeDefault.h === 1920, '9:16 crop always targets the standard export size');
+var sizeNone = CF.exporter.targetSizeFor({ edits: { crop: 'none' }, clips: [{ width: 1080, height: 1920 }] });
+ok(sizeNone.w === 1080 && sizeNone.h === 1920, 'keep-original at exactly 1080x1920 stays that size');
+var sizeWide = CF.exporter.targetSizeFor({ edits: { crop: 'none' }, clips: [{ width: 3840, height: 2160 }] });
+ok(sizeWide.w <= 1920 && sizeWide.h <= 1920, 'an oversized source is capped so the export stays a sane file size');
+var sizeMulti = CF.exporter.targetSizeFor({ edits: { crop: 'none' }, clips: [{ width: 720, height: 1280 }, { width: 1080, height: 1920 }] });
+ok(sizeMulti.w === 720 && sizeMulti.h === 1280,
+   'a multi-clip project with mixed sizes frames against the FIRST clip — later clips still render (drawFrame reads their own dimensions), just fit into clip 1\\'s shape');
 
 section('exporter — an incapable browser is reported, not crashed into');
 var support = CF.exporter.support();
@@ -528,7 +694,7 @@ section('preview — guard clauses and idle safety');
 ok(CF.preview.isOpen() === false, 'nothing is open at startup');
 ok(CF.preview.close() === undefined, 'closing with nothing open does not throw');
 ok(CF.preview.toggle() === undefined, 'toggling with nothing open does not throw');
-var noScenes = CF.project.create({ name: 'Empty', video: { duration: 5 } });
+var noScenes = singleClipProject('Empty', 5);
 noScenes.edits.segments = []; /* an empty timeline — the editor UI can't normally reach this
    (toggling always refuses to disable the last segment), but it's cheap insurance against a
    corrupted or hand-edited project record opening a blank preview instead of explaining why not */
@@ -631,11 +797,12 @@ function storageRoundTrip(ctx) {
   ];
   const proj = CF.project.create({
     name: "Sara's chopper <test>",
-    videoId: 'vid_1',
-    fingerprint: 'fp_1',
-    frameCount: frames.length,
     timeBudget: 10,
-    video: { duration: 27.4, width: 1080, height: 1920, size: 8500000, type: 'video/mp4', name: 'clip.mp4' }
+    clips: [{
+      videoId: 'vid_1', fingerprint: 'fp_1', name: 'clip.mp4',
+      frameCount: frames.length,
+      duration: 27.4, width: 1080, height: 1920, size: 8500000, type: 'video/mp4'
+    }]
   });
 
   return CF.db.putVideo({
@@ -786,7 +953,7 @@ ok(/data-action="overlay-delete"/.test(ed), 'deleting a single unwanted overlay 
 ok(ed.includes('Clear all overlays'), 'a bulk "clear all" action exists for trying a different text batch on the same clip');
 
 section('edit — no overlays yet: no stray Clear-all button');
-var bareEdit = CF.project.create({ name: 'NoOverlays', video: { duration: 9 } });
+var bareEdit = singleClipProject('NoOverlays', 9);
 CF.editor.ensureSegments(bareEdit);
 CF.state.studioProject = bareEdit;
 CF.render();
@@ -796,6 +963,48 @@ CF.render();
 
 CF.state.studioTab = 'export'; CF.render();
 ok(html('#view-studio').includes('cannot export'), 'export is honest about this browser being unable');
+
+section('studio — multi-clip: Plan tab shows a combined score and per-clip sections');
+var mc = twoClipProject();
+CF.state.studioProject = mc; CF.state.studioTab = 'plan'; CF.render();
+var mcPlan = html('#view-studio');
+ok(mcPlan.includes('COMBINED CONTENT SCORE'), 'a multi-clip project is explicitly labelled as a combined score');
+ok(mcPlan.includes('80'), 'the combined score averages the two clips (70 + 90) / 2');
+ok(mcPlan.includes('CLIP 1') && mcPlan.includes('CLIP 2'), 'each clip gets its own labelled section');
+ok(mcPlan.includes('unboxing') && mcPlan.includes('demo'), 'both clips\\' own descriptions are shown, not just one');
+ok(mcPlan.includes('Unboxing') && mcPlan.includes('Demo'), 'the scene plan is grouped under each clip\\'s own name');
+ok(mcPlan.includes('Clip B overlay'), 'generated content (project-level) still appears once, not duplicated per clip');
+ok(mcPlan.includes('Re-analyse all clips'), 'the re-analyse action is explicit that it covers every clip');
+
+section('studio — multi-clip: not every clip analysed yet');
+var partial = CF.project.create({ name: 'Partial' });
+CF.project.addClip(partial, { videoId: 'vp1', fingerprint: 'fp1', name: 'Done', duration: 5, frameCount: 6 });
+CF.project.addClip(partial, { videoId: 'vp2', fingerprint: 'fp2', name: 'Not yet', duration: 5, frameCount: 6 });
+partial.clips[0].analysis = { video: { product: 'x', description: 'y' }, score: { overall: 50 }, scenes: [] };
+CF.state.studioProject = partial; CF.render();
+var partialPlan = html('#view-studio');
+ok(partialPlan.includes('Not analysed yet'), 'the plan tab is honest that analysis is incomplete');
+ok(partialPlan.includes('1 of 2 clips already analysed'), 'it reports exactly how much is done');
+ok(partialPlan.includes('Analyse remaining clips'), 'the button is clear it will only cost quota for what is left');
+
+section('studio — multi-clip: Edit tab shows clip labels and the add-clip control');
+CF.state.studioProject = mc; CF.state.studioTab = 'edit'; CF.render();
+var mcEdit = html('#view-studio');
+ok(mcEdit.includes('Unboxing') && mcEdit.includes('Demo'), 'each scene row is labelled with which clip it belongs to');
+ok(mcEdit.includes('Clips (2 of ' + CF.MAX_CLIPS + ')'), 'the clip count and cap are both shown');
+ok(mcEdit.includes('data-action="add-clip"'), 'an add-clip action is offered');
+ok(!mcEdit.includes('data-action="add-clip" disabled') && !/data-action="add-clip"[^>]*disabled/.test(mcEdit),
+   'with only 2 of 3 clips used, adding another is not disabled');
+
+section('studio — multi-clip: the add-clip control disables once the cap is reached');
+var capped = twoClipProject();
+CF.project.addClip(capped, { videoId: 'vC', fingerprint: 'fC', name: 'Result', duration: 5 });
+CF.state.studioProject = capped; CF.state.studioTab = 'edit'; CF.render();
+var cappedEdit = html('#view-studio');
+ok(cappedEdit.includes('Clips (3 of ' + CF.MAX_CLIPS + ')'), 'the count reflects all three clips');
+ok(/data-action="add-clip"[^>]*disabled/.test(cappedEdit), 'add-clip is disabled once CF.MAX_CLIPS is reached');
+ok(cappedEdit.includes('Up to ' + CF.MAX_CLIPS + ' clips per project'), 'the cap is explained, not just silently disabled');
+CF.state.studioProject = full;
 
 section('studio — no leaked placeholders on any tab');
 ['plan','edit','export'].forEach(function (t) {
@@ -814,8 +1023,7 @@ section('render — no leaked placeholders on the main tabs');
 });
 
 section('projects — score badge');
-CF.state.projects[0].score = 92;
-CF.state.projects[0].aiAnalysis = full.aiAnalysis;
+CF.state.projects[0].clips = [{ id: 'sb1', analysis: full.clips[0].analysis, score: 92 }];
 CF.state.tab = 'projects'; CF.render();
 ok(html('#view-projects').includes('92/100'), 'a scored project shows its score');
 ok(html('#view-projects').includes('EXCELLENT'), 'and its verdict band');
@@ -947,8 +1155,36 @@ CF.ui.closeModal();
     });
 }
 
+function previewMultiClip(ctx) {
+  const CF = ctx.CF;
+  return Promise.all([
+    CF.db.putVideo({ id: 'vA', blob: new ctx.Blob(['a']), thumb: null, frames: [], name: 'a.mp4', size: 4 }),
+    CF.db.putVideo({ id: 'vB', blob: new ctx.Blob(['b']), thumb: null, frames: [], name: 'b.mp4', size: 4 })
+  ]).then(function () {
+    app.run(`
+section('preview — multi-clip: fetches every clip\\'s own blob, not just the first');
+var mp = CF.project.create({ name: 'Preview multi' });
+CF.project.addClip(mp, { videoId: 'vA', fingerprint: 'fA', name: 'A', duration: 5 });
+CF.project.addClip(mp, { videoId: 'vB', fingerprint: 'fB', name: 'B', duration: 5 });
+CF.editor.ensureSegments(mp);
+ok(CF.editor.outputTimeline(mp).segments.length === 2, 'one full-length segment per clip, no analysis needed');
+CF.preview.open(mp);
+CF.state.__previewMulti = mp;
+`);
+    return new Promise(function (resolve) { setTimeout(resolve, 10); });
+  }).then(function () {
+    app.run(`
+ok(CF.preview.isOpen() === true, 'a multi-clip preview opens successfully with both blobs available');
+CF.preview.close();
+ok(CF.preview.isOpen() === false, 'closes cleanly');
+CF.ui.closeModal();
+`);
+  });
+}
+
 app.runAsync(freshInstall)
   .then(function () { return app.runAsync(storageRoundTrip); })
   .then(function () { return app.runAsync(studioScreens); })
   .then(function () { return app.runAsync(previewOpenClose); })
+  .then(function () { return app.runAsync(previewMultiClip); })
   .then(function () { app.done(); });

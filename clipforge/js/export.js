@@ -211,7 +211,35 @@
   }
 
   /* opts: { onProgress(fraction, label), signal:{cancelled:bool} } */
-  X.render = function (project, videoBlob, opts) {
+  /* Target canvas size for a project's export/preview, shared so the two
+     can never disagree. For crop 'none' the first clip's shape is the
+     reference — drawFrame reads each segment's OWN video dimensions at draw
+     time and letterboxes/crops into whatever this returns, so a later clip
+     with different dimensions than clip 1 still renders correctly; it is
+     simply framed against clip 1's shape rather than its own. */
+  X.targetSizeFor = function (project) {
+    var crop = (project.edits && project.edits.crop) || '9:16';
+    var ref = (project.clips && project.clips[0]) || null;
+    if (crop === 'none' && ref && ref.width && ref.height) {
+      var cap = 1920 / Math.max(ref.width, ref.height);
+      var s = Math.min(1, cap);
+      return {
+        w: Math.round(ref.width * s / 2) * 2,   /* even dimensions encode reliably */
+        h: Math.round(ref.height * s / 2) * 2
+      };
+    }
+    return { w: X.TARGET_WIDTH, h: X.TARGET_HEIGHT };
+  };
+
+  /* opts: { onProgress(fraction, label), signal:{cancelled:bool} }
+     videoBlobs: { [clipId]: Blob } — one entry per clip actually referenced
+     by an enabled segment (a clip with everything switched off need not be
+     present). A separate <video> element is created per clip rather than
+     reusing one and swapping its `src`, so metadata for every clip can be
+     confirmed loaded before recording starts — a mid-recording stall while
+     the next clip's metadata parses would otherwise show up as a frozen
+     frame in the recorded output. */
+  X.render = function (project, videoBlobs, opts) {
     var options = opts || {};
     var report = options.onProgress || function () {};
     var signal = options.signal || { cancelled: false };
@@ -220,34 +248,39 @@
     if (!support.ok) {
       return Promise.reject(new Error(support.reasons.join(' ')));
     }
-    if (!videoBlob) {
-      return Promise.reject(new Error('The source video for this project is not available in this browser session.'));
-    }
 
     var timeline = CF.editor.outputTimeline(project);
     if (!timeline.segments.length || timeline.duration <= 0) {
       return Promise.reject(new Error('Nothing is switched on to export. Enable at least one segment.'));
     }
 
-    var crop = (project.edits && project.edits.crop) || '9:16';
-    var targetW = X.TARGET_WIDTH;
-    var targetH = X.TARGET_HEIGHT;
-    if (crop === 'none' && project.video && project.video.width && project.video.height) {
-      /* Keep the source shape, but cap the long edge so the file stays sane. */
-      var srcW = project.video.width;
-      var srcH = project.video.height;
-      var cap = 1920 / Math.max(srcW, srcH);
-      var s = Math.min(1, cap);
-      targetW = Math.round(srcW * s / 2) * 2;   /* even dimensions encode reliably */
-      targetH = Math.round(srcH * s / 2) * 2;
+    var clipIds = [];
+    timeline.segments.forEach(function (s) {
+      if (clipIds.indexOf(s.clipId) < 0) clipIds.push(s.clipId);
+    });
+    var missing = clipIds.filter(function (id) { return !videoBlobs || !videoBlobs[id]; });
+    if (missing.length) {
+      return Promise.reject(new Error('The source video for this project is not available in this browser session.'));
     }
 
-    var url = URL.createObjectURL(videoBlob);
-    var video = document.createElement('video');
-    video.src = url;
-    video.playsInline = true;
-    video.setAttribute('playsinline', '');
-    video.muted = !!(project.edits && project.edits.muted);
+    var crop = (project.edits && project.edits.crop) || '9:16';
+    var size = X.targetSizeFor(project);
+    var targetW = size.w;
+    var targetH = size.h;
+    var muted = !!(project.edits && project.edits.muted);
+
+    var urls = [];
+    var videos = {};
+    clipIds.forEach(function (id) {
+      var url = URL.createObjectURL(videoBlobs[id]);
+      urls.push(url);
+      var v = document.createElement('video');
+      v.src = url;
+      v.playsInline = true;
+      v.setAttribute('playsinline', '');
+      v.muted = muted;
+      videos[id] = v;
+    });
 
     var canvas = document.createElement('canvas');
     canvas.width = targetW;
@@ -264,9 +297,11 @@
       if (cleanedUp) return;
       cleanedUp = true;
       if (rafId) cancelAnimationFrame(rafId);
-      try { video.pause(); } catch (e) {}
-      video.src = '';
-      try { URL.revokeObjectURL(url); } catch (e) {}
+      clipIds.forEach(function (id) {
+        try { videos[id].pause(); } catch (e) {}
+        videos[id].src = '';
+      });
+      urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} });
       if (audioCtx && audioCtx.state !== 'closed') {
         try { audioCtx.close(); } catch (e) {}
       }
@@ -278,9 +313,15 @@
         reject(err instanceof Error ? err : new Error(String(err)));
       };
 
-      video.onerror = function () { failed(new Error('The source video could not be decoded for export.')); };
+      var metaPromises = clipIds.map(function (id) {
+        return new Promise(function (res, rej) {
+          var v = videos[id];
+          v.onerror = function () { rej(new Error('One of the source clips could not be decoded for export.')); };
+          v.onloadedmetadata = function () { res(); };
+        });
+      });
 
-      video.onloadedmetadata = function () {
+      Promise.all(metaPromises).then(function () {
         var stream;
         try {
           stream = canvas.captureStream(X.FPS);
@@ -288,16 +329,25 @@
           return failed(new Error('This browser refused to capture the canvas for recording.'));
         }
 
-        /* Pipe the source audio into the recording, unless muted. Failure here
-           is not fatal — a silent export still beats no export. */
-        if (!video.muted) {
+        /* Pipe every clip's source audio into the recording, unless muted.
+           Only one clip actually plays at a time (runSegments below is
+           strictly sequential), so routing all of them into the same
+           destination is safe — a paused element contributes nothing.
+           Failure here is not fatal — a silent export still beats no
+           export, and one clip's audio failing to tap does not sink the
+           others. */
+        if (!muted) {
           try {
             var Ctor = window.AudioContext || window.webkitAudioContext;
             if (Ctor) {
               audioCtx = new Ctor();
-              var source = audioCtx.createMediaElementSource(video);
               var dest = audioCtx.createMediaStreamDestination();
-              source.connect(dest);
+              clipIds.forEach(function (id) {
+                try {
+                  var source = audioCtx.createMediaElementSource(videos[id]);
+                  source.connect(dest);
+                } catch (e) { /* this clip's audio is skipped, not fatal */ }
+              });
               dest.stream.getAudioTracks().forEach(function (track) { stream.addTrack(track); });
             }
           } catch (e) {
@@ -335,9 +385,12 @@
 
         recorder.start(250);
         runSegments(0, 0);
-      };
+      }).catch(failed);
 
-      /* Walk the segments in output order, drawing every animation frame. */
+      /* Walk the segments in output order, drawing every animation frame.
+         Each segment plays from whichever clip it belongs to — switching
+         clips between segments is just picking a different already-loaded
+         <video> element, nothing more. */
       function runSegments(index, elapsedBefore) {
         if (signal.cancelled) {
           try { recorder.stop(); } catch (e) {}
@@ -352,6 +405,7 @@
         }
 
         var seg = timeline.segments[index];
+        var video = videos[seg.clipId];
         report(elapsedBefore / timeline.duration, 'Rendering ' + (index + 1) + '/' + timeline.segments.length);
 
         seek(video, seg.sourceStart).then(function () {

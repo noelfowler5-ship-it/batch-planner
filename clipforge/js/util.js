@@ -206,6 +206,22 @@ U.videoFingerprint = function (file, duration) {
   return 'v' + U.hashString(parts) + '_' + ((file && file.size) || 0).toString(36);
 };
 
+/* Round-robin merge of several arrays into one, preserving each array's own
+   order. Used to combine multiple clips' frames for the policy check: the
+   server caps the frame count it will accept, and a naive concatenation
+   would let an early clip's frames crowd out a later clip's entirely —
+   interleaving means every clip keeps some representation after the cap. */
+U.interleave = function (arrays) {
+  var lists = (arrays || []).filter(function (a) { return Array.isArray(a) && a.length; });
+  var out = [];
+  var i = 0;
+  while (lists.some(function (a) { return i < a.length; })) {
+    lists.forEach(function (a) { if (i < a.length) out.push(a[i]); });
+    i++;
+  }
+  return out;
+};
+
 U.dataUrlBytes = function (dataUrl) {
   if (!dataUrl || typeof dataUrl !== 'string') return 0;
   var i = dataUrl.indexOf(',');

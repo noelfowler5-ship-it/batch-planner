@@ -120,17 +120,33 @@
       return busyBar(st.aiBusy.label, st.aiBusy.fraction) + analysisStepsNote();
     }
 
-    if (!project.aiAnalysis) {
+    if (!CF.project.allAnalyzed(project)) {
+      var clips = project.clips || [];
+      var pending = clips.filter(function (c) { return !c.analysis; });
+      var multi = clips.length > 1;
+      var frames = clips.reduce(function (sum, c) { return sum + (c.frameCount || 0); }, 0);
+
       h += aiBlockedNote();
       h += '<div class="card">';
       h += '<div class="bold" style="margin-bottom:6px">Not analysed yet</div>';
-      h += '<div class="small muted">ClipForge will send <b>' + (project.frameCount || 0) +
-        ' still frames</b> from this clip to Gemini — not the video file — and get back a scene-by-scene plan.</div>';
+      if (multi) {
+        h += '<div class="small muted">ClipForge will send <b>' + frames + ' still frames</b> across your ' +
+          clips.length + ' clips to Gemini — not the video files — and get back one combined scene-by-scene plan.</div>';
+        if (pending.length && pending.length < clips.length) {
+          h += '<div class="tiny faint" style="margin-top:8px">' + (clips.length - pending.length) + ' of ' +
+            clips.length + ' clips already analysed. Analysing again only sends the remaining ' + pending.length + '.</div>';
+        }
+      } else {
+        h += '<div class="small muted">ClipForge will send <b>' + frames +
+          ' still frames</b> from this clip to Gemini — not the video file — and get back a scene-by-scene plan.</div>';
+      }
       h += '</div>';
-      h += ui.note('AI analysis sends this clip\'s frames to Gemini for analysis. Editing and project storage stay on your device.', 'info');
+      h += ui.note('AI analysis sends frames to Gemini for analysis. Editing and project storage stay on your device.', 'info');
       h += '<div style="height:14px"></div>';
       h += '<button class="btn-primary btn-block" data-action="analyze-now"' +
-           (CF.ai.blockedReason() ? ' disabled' : '') + '>Analyse this clip</button>';
+           (CF.ai.blockedReason() ? ' disabled' : '') + '>' +
+           (multi ? 'Analyse ' + (pending.length === clips.length ? 'all clips' : 'remaining clips') : 'Analyse this clip') +
+           '</button>';
       return h;
     }
 
@@ -155,21 +171,39 @@
 
   /* --------------------------------------------------------------- score */
 
+  /* For each score part, the average across every analysed clip — the same
+     honest-average approach as P.combinedScore, applied part by part so the
+     breakdown meters mean something for a multi-clip project too. */
+  function averagedScoreParts(clips) {
+    var out = {};
+    CF.aiSchema.SCORE_PARTS.forEach(function (part) {
+      var vals = clips.map(function (c) { return c.analysis && c.analysis.score && c.analysis.score[part[0]]; })
+        .filter(function (v) { return typeof v === 'number'; });
+      out[part[0]] = vals.length ? Math.round(vals.reduce(function (a, b) { return a + b; }, 0) / vals.length) : 0;
+    });
+    return out;
+  }
+
   function renderScore(project) {
-    var a = project.aiAnalysis;
-    var verdict = CF.aiSchema.verdictFor(a.score.overall);
+    var clips = project.clips || [];
+    var multi = clips.length > 1;
+    var overall = CF.project.combinedScore(project);
+    var verdict = CF.aiSchema.verdictFor(overall || 0);
     var h = '';
 
     h += '<div class="card" style="text-align:center">';
-    h += '<div class="tiny faint" style="letter-spacing:.1em">CONTENT SCORE</div>';
-    h += '<div class="score-big" style="color:var(--' + verdict.tone + ')">' + a.score.overall + '<span class="score-out">/100</span></div>';
+    h += '<div class="tiny faint" style="letter-spacing:.1em">' + (multi ? 'COMBINED CONTENT SCORE' : 'CONTENT SCORE') + '</div>';
+    h += '<div class="score-big" style="color:var(--' + verdict.tone + ')">' + overall + '<span class="score-out">/100</span></div>';
     h += '<div class="bold" style="color:var(--' + verdict.tone + ');margin-top:2px">' + U.esc(verdict.label) + '</div>';
-    h += '<div class="tiny faint" style="margin-top:8px">An editing judgement, not a prediction of views.</div>';
+    h += '<div class="tiny faint" style="margin-top:8px">' +
+      (multi ? 'Averaged across your ' + clips.length + ' clips. ' : 'An editing judgement') +
+      (multi ? 'An editing judgement, not a prediction of views.' : ', not a prediction of views.') + '</div>';
     h += '</div>';
 
     h += '<div class="card">';
+    var parts = averagedScoreParts(clips);
     CF.aiSchema.SCORE_PARTS.forEach(function (part) {
-      var value = a.score[part[0]];
+      var value = parts[part[0]];
       h += '<div class="meter-row">' +
         '<span class="small muted">' + U.esc(part[1]) + '</span>' +
         '<span class="meter"><i style="width:' + (value / 20 * 100) + '%"></i></span>' +
@@ -179,39 +213,51 @@
     h += '</div>';
 
     h += '<div class="section-label">What Gemini saw</div>';
-    h += '<div class="card">';
-    h += '<div class="small"><b>Product:</b> ' + U.esc(a.video.product) + '</div>';
-    h += '<div class="small muted" style="margin-top:6px">' + U.esc(a.video.description) + '</div>';
-    h += '</div>';
+    var totalFaces = 0;
+    clips.forEach(function (clip, i) {
+      var a = clip.analysis;
+      if (!a) return;
+      h += '<div class="card">';
+      if (multi) h += '<div class="tiny faint" style="margin-bottom:4px">CLIP ' + (i + 1) + ' — ' + U.esc(clip.name || '') + '</div>';
+      h += '<div class="small"><b>Product:</b> ' + U.esc(a.video.product) + '</div>';
+      h += '<div class="small muted" style="margin-top:6px">' + U.esc(a.video.description) + '</div>';
+      h += '</div>';
 
-    if (a.recommendedStructure && a.recommendedStructure.length) {
-      h += '<div class="section-label">Recommended structure</div>';
-      h += '<div class="card"><div class="structure">' +
-        a.recommendedStructure.map(function (s) {
-          return '<span class="struct-step">' + U.esc(PURPOSE_ICON[s] || '') + ' ' + U.esc(s) + '</span>';
-        }).join('<span class="struct-arrow">→</span>') +
-      '</div></div>';
-    }
+      if (a.recommendedStructure && a.recommendedStructure.length) {
+        h += '<div class="card" style="margin-top:8px"><div class="structure">' +
+          a.recommendedStructure.map(function (s) {
+            return '<span class="struct-step">' + U.esc(PURPOSE_ICON[s] || '') + ' ' + U.esc(s) + '</span>';
+          }).join('<span class="struct-arrow">→</span>') +
+        '</div></div>';
+      }
+      totalFaces += (a.scenes || []).filter(function (s) { return s.faceDetected; }).length;
+    });
 
-    var faces = a.scenes.filter(function (s) { return s.faceDetected; });
-    if (faces.length) {
-      h += ui.note('⚠️ <b>Face detected</b> in ' + faces.length + ' scene' + (faces.length > 1 ? 's' : '') +
-        '. This is faceless content — consider trimming ' + (faces.length > 1 ? 'those sections' : 'that section') +
+    if (totalFaces) {
+      h += ui.note('⚠️ <b>Face detected</b> in ' + totalFaces + ' scene' + (totalFaces > 1 ? 's' : '') +
+        '. This is faceless content — consider trimming ' + (totalFaces > 1 ? 'those sections' : 'that section') +
         ' on the Edit tab.', 'warn');
       h += '<div style="height:12px"></div>';
     }
 
     h += '<button class="btn-ghost btn-block" data-action="reanalyze"' +
-         (CF.ai.blockedReason() ? ' disabled' : '') + '>Re-analyse (uses quota)</button>';
+         (CF.ai.blockedReason() ? ' disabled' : '') + '>Re-analyse' + (multi ? ' all clips' : '') + ' (uses quota)</button>';
     h += '<div class="tiny faint" style="margin-top:8px">Results are cached, so reopening this project costs nothing.</div>';
     return h;
   }
 
   /* ----------------------------------------------------------- scene plan */
 
+  /* Content (hooks/captions/voiceover/overlays) is generated once across
+     every clip and stored in the combined/global timeline (see project.js),
+     so matching it against one clip's scene needs that scene's global
+     start/end, not its own local time — two clips can share the same local
+     numbers. */
   function renderScenePlan(project) {
     var h = '';
-    var scenes = project.aiAnalysis.scenes;
+    var clips = project.clips || [];
+    var multi = clips.length > 1;
+    var content = project.aiContent;
 
     h += '<div class="section-label">Scene plan</div>';
     h += '<div class="row" style="gap:8px;margin-bottom:12px">';
@@ -221,69 +267,81 @@
       'Switches off scenes marked REMOVE and adds the AI\'s text overlays. Reversible — the source video is never changed.' +
     '</div>';
 
-    scenes.forEach(function (scene, i) {
-      var content = project.aiContent;
-      var vo = content ? voiceoverLineFor(content, scene) : null;
-      var overlay = content ? overlayFor(content, scene) : null;
+    CF.editor.ensureSegments(project);
 
-      h += '<div class="card">';
-      h += '<div class="row-between">';
-      h += '<div class="bold">' + U.esc(PURPOSE_ICON[scene.purpose] || '') + ' ' + U.esc(scene.purpose) + '</div>';
-      h += '<span class="small mono faint">' + U.esc(U.clock(scene.start)) + '–' + U.esc(U.clock(scene.end)) + '</span>';
-      h += '</div>';
+    clips.forEach(function (clip, ci) {
+      var scenes = (clip.analysis && clip.analysis.scenes) || [];
+      if (!scenes.length) return;
+      if (multi) h += '<div class="tiny faint" style="margin:14px 0 6px">CLIP ' + (ci + 1) + ' — ' + U.esc(clip.name || '') + '</div>';
 
-      h += '<div class="small muted" style="margin-top:6px">' + U.esc(scene.description) + '</div>';
+      scenes.forEach(function (scene) {
+        var globalStart = CF.project.localToGlobal(project, clip.id, scene.start);
+        var globalEnd = CF.project.localToGlobal(project, clip.id, scene.end);
+        var vo = content ? voiceoverLineFor(content, globalStart, globalEnd) : null;
+        var overlay = content ? overlayFor(content, globalStart, globalEnd) : null;
+        var seg = (project.edits.segments || []).filter(function (s) {
+          return s.clipId === clip.id && s.sourceStart === scene.start && s.sourceEnd === scene.end;
+        })[0];
 
-      h += '<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">';
-      h += '<span class="tag">Strength ' + scene.visualStrength + '/10</span>';
-      h += '<span class="tag">' + U.esc(scene.editingRecommendation) + '</span>';
-      /* These two flags come straight from the analysis and used to be
-         invisible in the UI — shown only indirectly, and only once a
-         matching generated overlay/voiceover line happened to exist with
-         overlapping timing. If generation gave that moment slightly
-         different timing, the AI's own recommendation vanished with no
-         trace. Show it plainly regardless of whether a match was found. */
-      if (scene.textRecommended) h += '<span class="tag">📝 Text recommended</span>';
-      if (scene.voiceoverRecommended) h += '<span class="tag">🎙 VO recommended</span>';
-      if (scene.faceDetected) h += '<span class="tag" style="color:var(--warn);border-color:rgba(232,177,58,.4)">⚠ Face</span>';
-      h += '</div>';
+        h += '<div class="card">';
+        h += '<div class="row-between">';
+        h += '<div class="bold">' + U.esc(PURPOSE_ICON[scene.purpose] || '') + ' ' + U.esc(scene.purpose) + '</div>';
+        h += '<span class="small mono faint">' + U.esc(U.clock(scene.start)) + '–' + U.esc(U.clock(scene.end)) + '</span>';
+        h += '</div>';
 
-      if (scene.reason) {
-        h += '<div class="tiny faint" style="margin-top:8px">' + U.esc(scene.reason) + '</div>';
-      }
+        h += '<div class="small muted" style="margin-top:6px">' + U.esc(scene.description) + '</div>';
 
-      if (vo) {
-        h += '<div class="suggest"><div class="suggest-label">🎙 Voiceover</div>' +
-          '<div class="small">' + U.esc(vo.text) + '</div>' +
-          '<button class="btn-xs" style="margin-top:8px" data-action="copy-text" data-copy="' + U.esc(vo.text) + '">Copy</button>' +
-        '</div>';
-      } else if (scene.voiceoverRecommended && content) {
-        h += '<div style="margin-top:10px">' + ui.note(
-          'The AI recommended a voiceover line here, but the generated script doesn\'t line up with this exact moment. Check the full script below, or regenerate content.',
-          'warn') + '</div>';
-      }
+        h += '<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">';
+        h += '<span class="tag">Strength ' + scene.visualStrength + '/10</span>';
+        h += '<span class="tag">' + U.esc(scene.editingRecommendation) + '</span>';
+        /* These two flags come straight from the analysis and used to be
+           invisible in the UI — shown only indirectly, and only once a
+           matching generated overlay/voiceover line happened to exist with
+           overlapping timing. If generation gave that moment slightly
+           different timing, the AI's own recommendation vanished with no
+           trace. Show it plainly regardless of whether a match was found. */
+        if (scene.textRecommended) h += '<span class="tag">📝 Text recommended</span>';
+        if (scene.voiceoverRecommended) h += '<span class="tag">🎙 VO recommended</span>';
+        if (scene.faceDetected) h += '<span class="tag" style="color:var(--warn);border-color:rgba(232,177,58,.4)">⚠ Face</span>';
+        h += '</div>';
 
-      if (overlay) {
-        var already = CF.editor.hasOverlayText(project, overlay.text);
-        h += '<div class="suggest"><div class="suggest-label">📝 On-screen text</div>' +
-          '<div class="small">' + U.esc(overlay.text) + '</div>' +
-          '<button class="btn-xs" style="margin-top:8px" data-action="apply-overlay" data-oid="' + U.esc(overlay.id) + '"' +
-            (already ? ' disabled' : '') + '>' + (already ? '✓ Added' : 'Add to video') + '</button>' +
-        '</div>';
-      } else if (scene.textRecommended && content) {
-        h += '<div style="margin-top:10px">' + ui.note(
-          'The AI recommended on-screen text here, but none of the generated overlays line up with this exact moment. Check the suggested text below, or add your own on the Edit tab.',
-          'warn') + '</div>';
-      }
+        if (scene.reason) {
+          h += '<div class="tiny faint" style="margin-top:8px">' + U.esc(scene.reason) + '</div>';
+        }
 
-      if (scene.editingRecommendation === 'REMOVE') {
-        h += '<div class="suggest suggest-cut"><div class="suggest-label">✂ Recommendation</div>' +
-          '<div class="small">Cut this section.</div>' +
-          '<button class="btn-xs" style="margin-top:8px" data-action="cut-scene" data-idx="' + i + '">Switch it off</button>' +
-        '</div>';
-      }
+        if (vo) {
+          h += '<div class="suggest"><div class="suggest-label">🎙 Voiceover</div>' +
+            '<div class="small">' + U.esc(vo.text) + '</div>' +
+            '<button class="btn-xs" style="margin-top:8px" data-action="copy-text" data-copy="' + U.esc(vo.text) + '">Copy</button>' +
+          '</div>';
+        } else if (scene.voiceoverRecommended && content) {
+          h += '<div style="margin-top:10px">' + ui.note(
+            'The AI recommended a voiceover line here, but the generated script doesn\'t line up with this exact moment. Check the full script below, or regenerate content.',
+            'warn') + '</div>';
+        }
 
-      h += '</div>';
+        if (overlay) {
+          var already = CF.editor.hasOverlayText(project, overlay.text);
+          h += '<div class="suggest"><div class="suggest-label">📝 On-screen text</div>' +
+            '<div class="small">' + U.esc(overlay.text) + '</div>' +
+            '<button class="btn-xs" style="margin-top:8px" data-action="apply-overlay" data-oid="' + U.esc(overlay.id) + '"' +
+              (already ? ' disabled' : '') + '>' + (already ? '✓ Added' : 'Add to video') + '</button>' +
+          '</div>';
+        } else if (scene.textRecommended && content) {
+          h += '<div style="margin-top:10px">' + ui.note(
+            'The AI recommended on-screen text here, but none of the generated overlays line up with this exact moment. Check the suggested text below, or add your own on the Edit tab.',
+            'warn') + '</div>';
+        }
+
+        if (scene.editingRecommendation === 'REMOVE' && seg) {
+          h += '<div class="suggest suggest-cut"><div class="suggest-label">✂ Recommendation</div>' +
+            '<div class="small">Cut this section.</div>' +
+            '<button class="btn-xs" style="margin-top:8px" data-action="cut-scene" data-sid="' + U.esc(seg.id) + '">Switch it off</button>' +
+          '</div>';
+        }
+
+        h += '</div>';
+      });
     });
 
     if (!project.aiContent) {
@@ -293,23 +351,23 @@
     return h;
   }
 
-  function voiceoverLineFor(content, scene) {
+  function voiceoverLineFor(content, globalStart, globalEnd) {
     var variant = content.voiceovers && content.voiceovers[CF.state.studioVoiceover || 'medium'];
     if (!variant || !variant.segments) return null;
     var hit = null;
     variant.segments.forEach(function (s) {
-      var overlapStart = Math.max(s.start, scene.start);
-      var overlapEnd = Math.min(s.end, scene.end);
+      var overlapStart = Math.max(s.start, globalStart);
+      var overlapEnd = Math.min(s.end, globalEnd);
       if (overlapEnd - overlapStart > 0.3 && !hit) hit = s;
     });
     return hit;
   }
 
-  function overlayFor(content, scene) {
+  function overlayFor(content, globalStart, globalEnd) {
     var hit = null;
     (content.textOverlays || []).forEach(function (o) {
-      var overlapStart = Math.max(o.start, scene.start);
-      var overlapEnd = Math.min(o.end, scene.end);
+      var overlapStart = Math.max(o.start, globalStart);
+      var overlapEnd = Math.min(o.end, globalEnd);
       if (overlapEnd - overlapStart > 0.2 && !hit) hit = o;
     });
     return hit;
@@ -487,6 +545,10 @@
   /* ------------------------------------------------------------------- edit */
 
   function renderEdit(project) {
+    if (CF.state.ingest.active) {
+      return CF.screens.renderIngestProgress(CF.state.ingest);
+    }
+
     CF.editor.ensureSegments(project);
     var timeline = CF.editor.outputTimeline(project);
     var segs = project.edits.segments;
@@ -494,7 +556,7 @@
 
     h += '<div class="row-between" style="margin-bottom:10px">';
     h += '<div class="small muted mono">Output ' + U.esc(U.clock(timeline.duration)) +
-         ' of ' + U.esc(U.clock(project.video.duration)) + '</div>';
+         ' of ' + U.esc(U.clock(CF.project.combinedDuration(project))) + '</div>';
     h += '<div class="row" style="gap:6px">';
     h += '<button class="btn-xs" data-action="undo"' + (CF.editor.canUndo(project) ? '' : ' disabled') + '>↶ Undo</button>';
     h += '<button class="btn-xs" data-action="redo"' + (CF.editor.canRedo(project) ? '' : ' disabled') + '>↷ Redo</button>';
@@ -544,10 +606,12 @@
        No trim, split, reorder or delete: they always run in the order the AI
        found them, which is what makes this a one-tap choice rather than a
        timing edit. */
+    var multiClip = CF.project.isMultiClip(project);
     h += '<div class="section-label">Scenes (' + segs.length + ')</div>';
     h += '<div class="tiny faint" style="margin:-4px 0 10px">Tap a scene to include or exclude it.</div>';
     segs.forEach(function (seg) {
       var length = seg.sourceEnd - seg.sourceStart;
+      var clip = CF.project.findClip(project, seg.clipId);
       h += '<div class="card card-tight seg-pick' + (seg.enabled ? '' : ' disabled-seg') +
            '" data-action="seg-toggle" data-sid="' + U.esc(seg.id) + '">';
       h += '<div class="row-between">';
@@ -555,13 +619,23 @@
       h += '<span class="tag" style="' + (seg.enabled ? 'color:var(--good);border-color:rgba(53,192,122,.4)' : '') +
         '">' + (seg.enabled ? '✓ Included' : 'Excluded') + '</span>';
       h += '</div>';
-      h += '<div class="small muted mono" style="margin-top:4px">' + U.esc(U.clock(seg.sourceStart)) + '–' +
+      h += '<div class="small muted mono" style="margin-top:4px">' +
+        (multiClip && clip ? U.esc(clip.name || 'clip') + ' · ' : '') +
+        U.esc(U.clock(seg.sourceStart)) + '–' +
         U.esc(U.clock(seg.sourceEnd)) + ' · ' + U.esc(U.round(length, 1) + 's') + '</div>';
       h += '</div>';
     });
 
-    if (project.aiAnalysis) {
+    if ((project.clips || []).some(function (c) { return c.analysis; })) {
       h += '<button class="btn-ghost btn-block" style="margin-top:6px" data-action="reset-segments">Reset to the AI\'s cut</button>';
+    }
+
+    h += '<div class="section-label">Clips (' + (project.clips || []).length + ' of ' + CF.MAX_CLIPS + ')</div>';
+    h += '<div class="tiny faint" style="margin:-4px 0 10px">Add another clip to combine it into this same video — an unboxing, a demo, a result shot.</div>';
+    h += '<button class="btn-sm btn-block" data-action="add-clip"' +
+      (CF.project.canAddClip(project) ? '' : ' disabled') + '>+ Add another clip</button>';
+    if (!CF.project.canAddClip(project)) {
+      h += '<div class="tiny faint" style="margin-top:8px">Up to ' + CF.MAX_CLIPS + ' clips per project.</div>';
     }
 
     /* overlays — add or remove only, timing always matches what the AI
