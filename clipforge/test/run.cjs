@@ -183,6 +183,56 @@ ok(gen.value.voiceovers.short.totalSeconds > 0, 'spoken length is estimated from
 ok(typeof gen.value.voiceovers.short.fitsClip === 'boolean', 'each variant reports whether it fits the clip');
 ok(CF.aiSchema.validateGeneration({}, 20, 'bm').ok === false, 'an empty content response is rejected');
 
+section('util — how many captions a clip of this length carries');
+ok(CF.util.overlayCountFor(15).max === 1, 'a short clip gets a single caption');
+ok(CF.util.overlayCountFor(19.9).max === 1, 'just under 20s is still a single caption');
+ok(CF.util.overlayCountFor(22).max === 2, 'the 20-25s band allows a second');
+ok(CF.util.overlayCountFor(30).min === 3 && CF.util.overlayCountFor(30).max === 4,
+   'a long clip carries 3-4 changing captions');
+ok(CF.util.overlayCountFor(0).max === 1, 'unknown duration falls back to one, not many');
+
+section('ai-schema — caption count follows the clip length, not the AI');
+function genWithOverlays(overlays, duration) {
+  return CF.aiSchema.validateGeneration({
+    hooks: [{ style: 'curiosity', text: 'a' }],
+    captions: [{ style: 'casual', text: 'b' }],
+    voiceovers: { short: { segments: [] }, medium: { segments: [] }, full: { segments: [] } },
+    textOverlays: overlays
+  }, duration, 'bm');
+}
+/* A 15s clip that came back with four per-scene subtitles. */
+var short4 = genWithOverlays([
+  { text: 'satu', start: 0.5, end: 3, position: 'center', style: 'hook' },
+  { text: 'dua', start: 3.5, end: 6, position: 'center', style: 'benefit' },
+  { text: 'tiga', start: 6.5, end: 9, position: 'center', style: 'proof' },
+  { text: 'empat', start: 9.5, end: 12, position: 'center', style: 'cta' }
+], 15);
+ok(short4.value.textOverlays.length === 1, 'a 15s clip is trimmed to one caption');
+ok(short4.value.textOverlays[0].text === 'satu', 'the earliest caption is the one kept');
+ok(short4.value.textOverlays[0].end > 14,
+   'and it is stretched to sit there for the whole clip, not just its original 3s');
+ok(short4.repairs.some(function (r) { return /kept the first 1/.test(r); }),
+   'the trim is reported as a repair, never silent');
+ok(short4.value.textOverlays[0].id === 'o1', 'ids are renumbered after the trim');
+
+/* A 30s clip keeps its changing captions. */
+var long4 = genWithOverlays([
+  { text: 'satu', start: 0.5, end: 6, position: 'center', style: 'hook' },
+  { text: 'dua', start: 7, end: 13, position: 'center', style: 'benefit' },
+  { text: 'tiga', start: 14, end: 20, position: 'center', style: 'proof' },
+  { text: 'empat', start: 21, end: 28, position: 'center', style: 'cta' }
+], 30);
+ok(long4.value.textOverlays.length === 4, 'a 30s clip keeps all four changing captions');
+ok(long4.value.textOverlays[3].end <= 30, 'the last one still sits inside the clip');
+
+/* A short clip whose single caption was timed like a 2s subtitle. */
+var shortStretch = genWithOverlays([
+  { text: 'senang kerja', start: 0.5, end: 2.4, position: 'center', style: 'hook' }
+], 16);
+ok(shortStretch.value.textOverlays.length === 1, 'one caption stays one caption');
+ok(shortStretch.value.textOverlays[0].end > 15, 'a too-brief single caption is held for the whole clip');
+ok(shortStretch.repairs.some(function (r) { return /whole clip/.test(r); }), 'the stretch is reported');
+
 section('ai-schema — policy check: the normal, expected result is "nothing found"');
 var clean = CF.aiSchema.validatePolicyCheck({ overallRisk: 'low', summary: 'No obvious issues found.', flags: [] });
 ok(clean.ok === true, 'a clean result with no flags validates');
@@ -405,6 +455,52 @@ show('reported reason', support.reasons[0]);
 
 section('exporter — drawFrame is public so preview.js can share it');
 ok(typeof CF.exporter.drawFrame === 'function', 'drawFrame is exposed, not a private closure-only helper');
+
+section("exporter — captions are painted in the creator's style");
+/* A recording 2D context: drawOverlay is pure drawing, so the calls it makes
+   ARE the output, and asserting on them is the only way to check the look
+   without a real canvas. */
+function recordingCtx() {
+  var calls = { stroke: [], fill: [], rects: 0, paths: 0 };
+  return {
+    calls: calls,
+    globalAlpha: 1, font: '', textAlign: '', textBaseline: '',
+    lineWidth: 0, lineJoin: '', miterLimit: 0, fillStyle: '', strokeStyle: '',
+    save: function () {}, restore: function () {},
+    translate: function () {}, scale: function () {},
+    measureText: function (t) { return { width: String(t).length * 20 }; },
+    strokeText: function (t) { calls.stroke.push({ text: t, style: this.strokeStyle, width: this.lineWidth }); },
+    fillText: function (t) { calls.fill.push({ text: t, style: this.fillStyle }); },
+    fillRect: function () { calls.rects++; },
+    beginPath: function () { calls.paths++; },
+    moveTo: function () {}, lineTo: function () {}, quadraticCurveTo: function () {},
+    closePath: function () {}, fill: function () { calls.rects++; }, stroke: function () {}
+  };
+}
+var rc = recordingCtx();
+CF.exporter.drawOverlay(rc, {
+  text: 'Senang kerja mak-mak', start: 0, end: 3,
+  position: 'center', style: 'benefit', animation: 'none'
+}, 1080, 1920, 0.5);
+ok(rc.calls.fill.length > 0, 'the caption text is actually drawn');
+ok(rc.calls.fill.every(function (c) { return c.style === '#ffffff'; }),
+   'caption text is white, whatever its style field says');
+ok(rc.calls.stroke.length === rc.calls.fill.length,
+   'every line gets an outline pass as well as a fill pass');
+ok(rc.calls.stroke.every(function (c) { return c.style.indexOf('rgba(0,0,0') === 0; }),
+   'the outline is black — the only thing keeping white text readable with no box');
+ok(rc.calls.stroke.every(function (c) { return c.width > 1; }), 'the outline is thick enough to see');
+ok(rc.calls.rects === 0 && rc.calls.paths === 0,
+   'no box is drawn behind the text — the old coloured pill is gone');
+/* The style field must no longer change the paint. */
+var rcHook = recordingCtx();
+CF.exporter.drawOverlay(rcHook, {
+  text: 'Senang kerja mak-mak', start: 0, end: 3,
+  position: 'center', style: 'hook', animation: 'none'
+}, 1080, 1920, 0.5);
+ok(rcHook.calls.fill[0].style === rc.calls.fill[0].style,
+   'a hook and a benefit caption are painted identically');
+ok(rcHook.calls.rects === 0, 'a hook caption gets no box either');
 
 section('preview — guard clauses and idle safety');
 ok(CF.preview.isOpen() === false, 'nothing is open at startup');

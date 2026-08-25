@@ -323,6 +323,31 @@
       };
     });
 
+    /* The clip's length decides how many captions it carries. The prompt asks
+       for the right number, but the prompt is a request, not a guarantee —
+       a short clip that came back with six per-scene subtitles would look
+       nothing like what this creator posts, so trim to the earliest few. */
+    var want = CF.util.overlayCountFor(d);
+    if (textOverlays.length > want.max) {
+      repairs.push('overlay: kept the first ' + want.max + ' of ' + textOverlays.length +
+                   ' — a ' + Math.round(d) + 's clip carries at most that many');
+      textOverlays = textOverlays.slice(0, want.max);
+      textOverlays.forEach(function (o, i) { o.id = 'o' + (i + 1); });
+    }
+    /* A single caption on a short clip is meant to sit there for the whole
+       video. If the model timed it like a 2-second subtitle anyway, stretch
+       it rather than discard an otherwise good line. */
+    if (want.max === 1 && textOverlays.length === 1 && d > 0) {
+      var only = textOverlays[0];
+      var wantEnd = Math.max(0, d - 0.3);
+      if (only.end < wantEnd - 1) {
+        repairs.push('overlay: held the caption for the whole clip instead of ' +
+                     Math.round(only.end) + 's');
+        only.start = Math.min(only.start, 1);
+        only.end = wantEnd;
+      }
+    }
+
     if (!hooks.length && !captions.length && !textOverlays.length) {
       return { ok: false, errors: ['The AI returned no usable content for this clip.'], repairs: repairs };
     }

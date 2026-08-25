@@ -157,6 +157,31 @@ hatch is `PROMPT_VERSION` in `ai-client.js` (mirrored in the three functions)
 **Bump it whenever a bug may have poisoned stored results**, not only when a
 prompt changes. Per-project, "Analyse again" forces a single bypass.
 
+### On-screen text follows the creator's real captions
+
+The overlay look and timing are copied from this creator's own published
+videos, not from generic short-form advice:
+
+- **White text, heavy dark outline, no box.** Their shots are frequently a
+  white gadget on a pale counter, so the outline — not a background pill —
+  is what keeps the text readable. The `style` field (hook / benefit /
+  proof / cta) still records what a line is *for*, but no longer changes how
+  it is painted; the old colour-coded pills looked nothing like the real feed.
+- **Vertically centred**, which is where every one of their captions sits.
+- **Count follows clip length, not the editing time budget** — see
+  `U.overlayCountFor()`, mirrored in the generate prompt. Under 20s gets one
+  caption held for the whole video (3 of their 4 reference posts do exactly
+  this); 20–25s allows two; over 25s gets 3–4 that change as the demo moves.
+  The validator enforces this, because the prompt is a request, not a
+  guarantee: extra captions are trimmed and a too-brief lone caption is
+  stretched to cover the clip, both reported as repairs.
+- **Colloquial Malay with 1–3 emoji**, matching how they actually write
+  ("je", "ni", "korang", "mak-mak"). The prompt carries real caption examples
+  as a register reference.
+- **No numeric prices, ever.** Only vague value words ("murah", "berbaloi",
+  "bajet"). The app cannot know a real price, and an invented one is exactly
+  the kind of misleading claim the policy check exists to catch.
+
 ### Why canvas + MediaRecorder, not ffmpeg.wasm, for export
 
 ffmpeg.wasm is a ~30 MB download, its fast core needs COOP/COEP headers that
@@ -240,7 +265,7 @@ installed copies keep serving the old version.
 
 ```
 cd clipforge
-node test/run.cjs      # 279 assertions — browser app
+node test/run.cjs      # 302 assertions — browser app
 node test/server.mjs   #  26 assertions — Netlify proxy helpers
 ```
 
@@ -278,10 +303,16 @@ verified by hand:
    closing it (X, Esc, backdrop tap) always stops playback and frees the object
    URL — the harness can fake the open/close plumbing but not real `<video>`
    timing.
-5. **MP4 conversion** — downloads ffmpeg.wasm from a CDN on first use
-6. A real Gemini call with a live API key, including **the policy check** —
+5. **Emoji in captions** — the creator's style calls for 1–3 emoji per line,
+   and captions are drawn with `strokeText` then `fillText`. Colour emoji
+   under an outline pass is the one part of the caption look that cannot be
+   checked headlessly: confirm on a real device that emoji render in colour
+   and are not doubled or blacked out by the outline. If they are, skip the
+   stroke pass for emoji code points.
+6. **MP4 conversion** — downloads ffmpeg.wasm from a CDN on first use
+7. A real Gemini call with a live API key, including **the policy check** —
    confirm it fires automatically after generation and that a genuinely risky
    script (e.g. a hook claiming a fake discount deadline) actually gets
    flagged, not just the happy "looks fine" path
-7. An iPhone HEVC `.mov` — some browsers refuse to decode it, and the app should
+8. An iPhone HEVC `.mov` — some browsers refuse to decode it, and the app should
    say so clearly rather than hang

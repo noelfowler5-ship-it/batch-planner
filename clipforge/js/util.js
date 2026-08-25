@@ -128,6 +128,20 @@ U.framesForDuration = function (duration) {
   return U.clamp(n, 6, CF.FRAME_COUNT);
 };
 
+/* How many on-screen text overlays a clip of this length should carry.
+
+   Taken from how this creator actually posts: a short clip gets one caption
+   that sits there for the whole video, and only a longer clip earns text
+   that changes as the demo moves. The 20-25s band is the in-between case and
+   gets two. Both the prompt and the validator use this, so the AI is asked
+   for the same number the app will accept. */
+U.overlayCountFor = function (duration) {
+  var d = duration > 0 ? duration : 0;
+  if (d < 20) return { min: 1, max: 1 };
+  if (d <= 25) return { min: 1, max: 2 };
+  return { min: 3, max: 4 };
+};
+
 U.aspectLabel = function (w, h) {
   if (!w || !h) return '—';
   if (Math.abs(w / h - 9 / 16) < 0.02) return '9:16';

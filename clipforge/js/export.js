@@ -26,14 +26,15 @@
   X.TARGET_HEIGHT = 1920;
   X.FPS = 30;
 
-  /* Overlay colours per style. Kept here so the preview and the exported file
-     cannot drift apart. */
-  var STYLE_COLORS = {
-    hook: { fill: '#ffffff', box: 'rgba(255,92,57,0.92)' },
-    benefit: { fill: '#1a0d08', box: 'rgba(255,214,102,0.95)' },
-    proof: { fill: '#ffffff', box: 'rgba(24,24,28,0.85)' },
-    cta: { fill: '#0d1a12', box: 'rgba(90,230,160,0.95)' }
-  };
+  /* One overlay look for every style: white text with a heavy dark outline
+     and no box, matching how this creator actually captions their posts.
+
+     The `style` field still exists on overlays — the editor and the AI both
+     use it to say what a line is *for* — it simply no longer changes how the
+     line is painted. Colour-coded boxes made the app's output look nothing
+     like the real feed it is meant to produce. */
+  var TEXT_FILL = '#ffffff';
+  var TEXT_OUTLINE = 'rgba(0,0,0,0.92)';
 
   /* ------------------------------------------------------------ capability */
 
@@ -125,8 +126,6 @@
 
   /* progress is 0..1 through the overlay's own lifetime, used for fade/pop. */
   X.drawOverlay = function (ctx, overlay, width, height, progress) {
-    var colors = STYLE_COLORS[overlay.style] || STYLE_COLORS.benefit;
-
     var alpha = 1;
     var scale = 1;
     var IN = 0.18;
@@ -158,12 +157,6 @@
     var lineHeight = Math.round(fontSize * 1.24);
     var blockHeight = lines.length * lineHeight + pad * 2;
 
-    var widest = 0;
-    lines.forEach(function (l) {
-      widest = Math.max(widest, ctx.measureText(l).width);
-    });
-    var boxWidth = Math.min(width * 0.9, widest + pad * 2);
-
     var centerY;
     if (overlay.position === 'top') centerY = height * 0.17;
     else if (overlay.position === 'bottom') centerY = height * 0.8;
@@ -172,36 +165,25 @@
     ctx.translate(width / 2, centerY);
     ctx.scale(scale, scale);
 
-    var radius = Math.round(fontSize * 0.35);
-    var bx = -boxWidth / 2;
-    var by = -blockHeight / 2;
-    ctx.fillStyle = colors.box;
-    roundRect(ctx, bx, by, boxWidth, blockHeight, radius);
-    ctx.fill();
+    /* Outline, then fill, per line. Without a box behind it the outline is
+       the only thing keeping white text readable over pale footage — a
+       white gadget on a white counter is this creator's normal shot — so it
+       is drawn thick, with round joins so letters don't grow spikes. */
+    ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.17));
+    ctx.strokeStyle = TEXT_OUTLINE;
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
+    ctx.fillStyle = TEXT_FILL;
 
-    ctx.fillStyle = colors.fill;
-    var firstLineY = by + pad + lineHeight / 2;
+    var firstLineY = -blockHeight / 2 + pad + lineHeight / 2;
     lines.forEach(function (l, i) {
-      ctx.fillText(l, 0, firstLineY + i * lineHeight);
+      var y = firstLineY + i * lineHeight;
+      ctx.strokeText(l, 0, y);
+      ctx.fillText(l, 0, y);
     });
 
     ctx.restore();
   };
-
-  function roundRect(ctx, x, y, w, h, r) {
-    var radius = Math.min(r, w / 2, h / 2);
-    ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.lineTo(x + w - radius, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-    ctx.lineTo(x + w, y + h - radius);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-    ctx.lineTo(x + radius, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-    ctx.lineTo(x, y + radius);
-    ctx.quadraticCurveTo(x, y, x + radius, y);
-    ctx.closePath();
-  }
 
   X.drawOverlaysAt = function (ctx, project, outputTime, width, height) {
     CF.editor.overlaysAt(project, outputTime).forEach(function (o) {
