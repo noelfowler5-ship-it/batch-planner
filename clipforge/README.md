@@ -181,6 +181,14 @@ videos, not from generic short-form advice:
 - **No numeric prices, ever.** Only vague value words ("murah", "berbaloi",
   "bajet"). The app cannot know a real price, and an invented one is exactly
   the kind of misleading claim the policy check exists to catch.
+- **The example set can grow.** Settings → Caption style examples starts with
+  the four lines above but is editable — add real captions as the creator
+  posts more, so the AI's voice keeps tracking theirs instead of staying
+  pinned to what it shipped with. `U.sanitizeStyleExamples()` caps this at 12
+  entries / 160 characters each, client and server both, since it goes
+  straight into the prompt. Changing the list is part of the generate cache
+  key (`styleHash`), so editing it and regenerating is guaranteed to use the
+  new voice rather than replay text written for the old one.
 
 ### Why canvas + MediaRecorder, not ffmpeg.wasm, for export
 
@@ -265,7 +273,7 @@ installed copies keep serving the old version.
 
 ```
 cd clipforge
-node test/run.cjs      # 302 assertions — browser app
+node test/run.cjs      # 317 assertions — browser app
 node test/server.mjs   #  26 assertions — Netlify proxy helpers
 ```
 

@@ -356,6 +356,7 @@
       language: project.language,
       timeBudget: project.timeBudget,
       model: state.settings.aiModel,
+      styleExamples: state.settings.styleExamples,
       force: force
     }).then(function (result) {
       stop();
@@ -657,6 +658,36 @@
         break;
       case 'load-models':
         loadModels();
+        break;
+      case 'add-style-example':
+        if ((state.settings.styleExamples || []).length < CF.MAX_STYLE_EXAMPLES) CF.screens.styleExampleForm();
+        break;
+      case 'save-style-example': {
+        var exText = inputValue('#styleExampleInput').trim();
+        if (!exText) { ui.toast('Type a caption first', 'warn'); break; }
+        state.settings.styleExamples = U.sanitizeStyleExamples(
+          (state.settings.styleExamples || []).concat([exText]));
+        saveSettings();
+        ui.closeModal();
+        render();
+        break;
+      }
+      case 'remove-style-example': {
+        var exIdx = parseInt(value, 10);
+        var examples = (state.settings.styleExamples || []).slice();
+        if (exIdx >= 0 && exIdx < examples.length) {
+          examples.splice(exIdx, 1);
+          state.settings.styleExamples = examples;
+          saveSettings();
+          render();
+        }
+        break;
+      }
+      case 'reset-style-examples':
+        state.settings.styleExamples = CF.DEFAULT_STYLE_EXAMPLES.slice();
+        saveSettings();
+        render();
+        ui.toast('Reset to the default examples');
         break;
       case 'set-model':
         state.settings.aiModel = value === '__default__' ? '' : value;

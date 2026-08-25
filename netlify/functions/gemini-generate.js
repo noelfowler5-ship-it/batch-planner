@@ -40,19 +40,48 @@ Hard rules:
 /* How this creator actually captions their posts, taken from their own
    published videos rather than from generic TikTok advice. The model copies
    register far better from real examples than from adjectives. */
-const OVERLAY_VOICE = `On-screen text style — match this creator's real captions:
+/* Mirrors CF.DEFAULT_STYLE_EXAMPLES in clipforge/js/util.js — this is what a
+   request sends when Settings → Caption style examples is still empty (a
+   fresh install, or the creator hit "Reset to defaults"). Keep both lists in
+   sync if they change. */
+const DEFAULT_STYLE_EXAMPLES = [
+  'Tengah malam lapar? / Nasip baik ada benda ni, senang kerja',
+  'Pembuka penutup tin makanan AUTOMATIC!!',
+  'Pencenkan lesung batu korang! 😗 / Tumbuk sambal tak bising, senang je.',
+  'SENANG KERJA MAK-MAK 👍👍🔥'
+];
+const MAX_STYLE_EXAMPLES = 12;
+const MAX_STYLE_EXAMPLE_CHARS = 160;
+
+/* Same caps as U.sanitizeStyleExamples client-side — the client already
+   enforces these, but a request body is untrusted input and gets its own
+   pass regardless. */
+function sanitizeStyleExamples(list) {
+  const seen = new Set();
+  const out = [];
+  (Array.isArray(list) ? list : []).forEach((raw) => {
+    const text = String(raw == null ? '' : raw).trim().slice(0, MAX_STYLE_EXAMPLE_CHARS);
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    if (out.length < MAX_STYLE_EXAMPLES) out.push(text);
+  });
+  return out;
+}
+
+function buildOverlayVoice(styleExamples) {
+  const examples = styleExamples.length ? styleExamples : DEFAULT_STYLE_EXAMPLES;
+  const quoted = examples.map((e) => `  "${e.replace(/"/g, "'")}"`).join('\n');
+  return `On-screen text style — match this creator's real captions:
 - Everyday spoken Malay, including the loose spellings people actually type ("je", "ni", "korang", "mak-mak", "yerr"). Never textbook Malay.
 - One or two short lines. The first line hooks, the second pays it off.
 - End a line with 1-3 emoji when it suits the tone. Real examples: "✨", "👍👍🔥", "😗".
 - Real captions from this creator, as a register reference only — do not reuse the wording or the product:
-  "Tengah malam lapar? / Nasip baik ada benda ni, senang kerja"
-  "Pembuka penutup tin makanan AUTOMATIC!!"
-  "Pencenkan lesung batu korang! 😗 / Tumbuk sambal tak bising, senang je."
-  "SENANG KERJA MAK-MAK 👍👍🔥"
+${quoted}
 - Write about whatever the scene plan actually shows, in that voice.`;
+}
 
 function buildPrompt(input) {
-  const { analysis, duration, language } = input;
+  const { analysis, duration, language, styleExamples } = input;
   const langRule = LANGUAGE_RULES[language] || LANGUAGE_RULES.bm;
 
   /* Overlay count follows the clip's own length, not the editing time
@@ -70,7 +99,7 @@ function buildPrompt(input) {
 
   return `${langRule}
 
-${OVERLAY_VOICE}
+${buildOverlayVoice(styleExamples)}
 
 Clip duration: ${duration} seconds.
 Product as identified: ${(analysis.video && analysis.video.product) || 'unclear'}.
@@ -148,7 +177,8 @@ export default guard(async (req, apiKey) => {
       analysis,
       duration: Math.round(duration * 100) / 100,
       language,
-      timeBudget: Number(body.timeBudget) || 5
+      timeBudget: Number(body.timeBudget) || 5,
+      styleExamples: sanitizeStyleExamples(body.styleExamples)
     }) }],
     systemInstruction: SYSTEM,
     temperature: 0.85   /* copy benefits from some variety, unlike analysis */

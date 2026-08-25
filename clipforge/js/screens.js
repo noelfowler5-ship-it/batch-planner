@@ -333,6 +333,9 @@
          '<span class="small mono bold" id="storageUsed">…</span></div>';
     h += '</div>';
 
+    h += '<div class="section-label">Caption style examples</div>';
+    h += renderStyleExamples(s);
+
     h += '<div class="section-label">AI model</div>';
     h += renderModelPicker(CF.state);
 
@@ -352,6 +355,57 @@
       var el = ui.$('#aiCacheCount');
       if (el) el.textContent = String(n);
     });
+  };
+
+  /* Real caption lines the generate prompt is shown as a register reference
+     — see U.sanitizeStyleExamples and OVERLAY_VOICE in gemini-generate.js.
+     Editable here so the AI's voice can keep tracking the creator's as it
+     changes, instead of staying pinned to the four examples it shipped with. */
+  function renderStyleExamples(s) {
+    var list = s.styleExamples || [];
+    var h = '<div class="card">';
+    h += '<div class="tiny faint">Real lines from your own posts. The AI reads these for tone and ' +
+      'spelling — not to copy the words, just the voice.</div>';
+
+    if (list.length) {
+      h += '<div style="height:10px"></div>';
+      list.forEach(function (text, i) {
+        h += '<div class="row-between" style="margin-top:6px;gap:8px">' +
+          '<span class="small" style="flex:1">' + U.esc(text) + '</span>' +
+          '<button class="btn-xs" data-action="remove-style-example" data-value="' + i + '">Remove</button>' +
+          '</div>';
+      });
+    } else {
+      h += '<div style="height:10px"></div>';
+      h += '<div class="tiny faint">No examples — the AI will fall back to a generic casual tone.</div>';
+    }
+
+    h += '<div class="row" style="gap:8px;margin-top:12px">';
+    h += '<button class="btn-sm" style="flex:1" data-action="add-style-example"' +
+      (list.length >= CF.MAX_STYLE_EXAMPLES ? ' disabled' : '') + '>+ Add example</button>';
+    h += '<button class="btn-ghost btn-sm" style="flex:1" data-action="reset-style-examples">Reset to defaults</button>';
+    h += '</div>';
+    if (list.length >= CF.MAX_STYLE_EXAMPLES) {
+      h += '<div class="tiny faint" style="margin-top:8px">Up to ' + CF.MAX_STYLE_EXAMPLES +
+        ' examples — remove one to add another.</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  S.styleExampleForm = function () {
+    ui.openModal(
+      '<div class="modal-title">Add a caption example</div>' +
+      '<div class="tiny faint" style="margin-bottom:10px">Paste one real caption you posted, exactly as written — ' +
+        'spelling, slang and emoji included.</div>' +
+      '<label class="field"><span>Caption text</span>' +
+      '<textarea id="styleExampleInput" rows="3" maxlength="' + CF.MAX_STYLE_EXAMPLE_CHARS +
+      '" placeholder="Tengah malam lapar? Nasip baik ada benda ni..."></textarea></label>' +
+      '<div class="row" style="gap:8px">' +
+        '<button class="btn-ghost" style="flex:1" data-action="close-modal">Cancel</button>' +
+        '<button class="btn-primary" style="flex:1" data-action="save-style-example">Add</button>' +
+      '</div>'
+    );
   };
 
   /* The model list is fetched live from Google rather than hardcoded, so a

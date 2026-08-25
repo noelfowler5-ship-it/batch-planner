@@ -41,12 +41,22 @@
     faceFree: true,
     aiModel: '',              /* empty = whatever the server defaults to */
     lastTab: 'create',
-    projectSort: 'recent'     /* 'recent' | 'score' */
+    projectSort: 'recent',    /* 'recent' | 'score' */
+    /* Real caption lines the generate prompt is shown as a style reference.
+       Starts as CF.DEFAULT_STYLE_EXAMPLES; Settings lets it grow as the
+       creator adds more of their own posts, so the AI's voice keeps
+       tracking theirs instead of staying pinned to four examples forever. */
+    styleExamples: CF.DEFAULT_STYLE_EXAMPLES.slice()
   };
 
   db.loadSettings = function () {
     var out = {};
-    for (var k in SETTINGS_DEFAULTS) out[k] = SETTINGS_DEFAULTS[k];
+    /* Arrays copied per call — SETTINGS_DEFAULTS itself must never be
+       mutated by whatever the caller does to the returned settings object. */
+    for (var k in SETTINGS_DEFAULTS) {
+      var v = SETTINGS_DEFAULTS[k];
+      out[k] = Array.isArray(v) ? v.slice() : v;
+    }
     try {
       var raw = localStorage.getItem(LS_SETTINGS);
       if (raw) {
@@ -56,6 +66,7 @@
         }
       }
     } catch (e) { /* corrupt or unavailable — defaults are fine */ }
+    out.styleExamples = CF.util.sanitizeStyleExamples(out.styleExamples);
     return out;
   };
 

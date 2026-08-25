@@ -41,8 +41,37 @@ CF.FRAME_QUALITY = 0.72;
 CF.ACCEPTED_TYPES = ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v'];
 CF.MAX_SENSIBLE_BYTES = 500 * 1024 * 1024; /* 500 MB — beyond this the browser struggles */
 
+/* Starting point for the caption-style examples the generate prompt learns
+   from (see Settings → Caption style examples). Real lines from this
+   creator's own posts, picked when the overlay style was first built.
+   Mirrored server-side in gemini-generate.js as the fallback for a request
+   that sends none — keep both in sync if these change. */
+CF.DEFAULT_STYLE_EXAMPLES = [
+  'Tengah malam lapar? / Nasip baik ada benda ni, senang kerja',
+  'Pembuka penutup tin makanan AUTOMATIC!!',
+  'Pencenkan lesung batu korang! 😗 / Tumbuk sambal tak bising, senang je.',
+  'SENANG KERJA MAK-MAK 👍👍🔥'
+];
+CF.MAX_STYLE_EXAMPLES = 12;
+CF.MAX_STYLE_EXAMPLE_CHARS = 160;
+
 var U = {};
 CF.util = U;
+
+/* Trim, drop empties/dupes, cap length and count. Used wherever a style
+   example list is accepted — Settings storage and the outgoing request both
+   run input through this, so neither can drift from what the other expects. */
+U.sanitizeStyleExamples = function (list) {
+  var seen = {};
+  var out = [];
+  (Array.isArray(list) ? list : []).forEach(function (raw) {
+    var text = String(raw == null ? '' : raw).trim().slice(0, CF.MAX_STYLE_EXAMPLE_CHARS);
+    if (!text || seen[text]) return;
+    seen[text] = true;
+    if (out.length < CF.MAX_STYLE_EXAMPLES) out.push(text);
+  });
+  return out;
+};
 
 U.uid = function (prefix) {
   return (prefix || 'id') + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);

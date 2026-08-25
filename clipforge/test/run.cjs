@@ -183,6 +183,28 @@ ok(gen.value.voiceovers.short.totalSeconds > 0, 'spoken length is estimated from
 ok(typeof gen.value.voiceovers.short.fitsClip === 'boolean', 'each variant reports whether it fits the clip');
 ok(CF.aiSchema.validateGeneration({}, 20, 'bm').ok === false, 'an empty content response is rejected');
 
+section('util — sanitizing the caption style examples list');
+ok(CF.util.sanitizeStyleExamples(['  Nasip baik  ', 'Nasip baik']).length === 1,
+   'duplicate examples (after trimming) collapse to one');
+ok(CF.util.sanitizeStyleExamples(['', '   ', 'real one']).length === 1,
+   'blank entries are dropped');
+ok(CF.util.sanitizeStyleExamples('not an array').length === 0, 'a non-array input yields no examples, not a throw');
+ok(CF.util.sanitizeStyleExamples(null).length === 0, 'null input yields no examples');
+var longOne = CF.util.sanitizeStyleExamples(['x'.repeat(500)])[0];
+ok(longOne.length === CF.MAX_STYLE_EXAMPLE_CHARS, 'an over-long example is truncated to the character cap');
+var many = [];
+for (var mi = 0; mi < CF.MAX_STYLE_EXAMPLES + 5; mi++) many.push('example ' + mi);
+ok(CF.util.sanitizeStyleExamples(many).length === CF.MAX_STYLE_EXAMPLES, 'the list is capped at MAX_STYLE_EXAMPLES');
+
+section('db — settings defaults include the starting style examples, and stay independent per load');
+var settingsA = CF.db.loadSettings();
+ok(Array.isArray(settingsA.styleExamples) && settingsA.styleExamples.length === CF.DEFAULT_STYLE_EXAMPLES.length,
+   'a fresh install starts with the built-in style examples');
+settingsA.styleExamples.push('mutated by caller');
+var settingsB = CF.db.loadSettings();
+ok(settingsB.styleExamples.length === CF.DEFAULT_STYLE_EXAMPLES.length,
+   'mutating one loaded settings object does not leak into the next load (no shared array reference)');
+
 section('util — how many captions a clip of this length carries');
 ok(CF.util.overlayCountFor(15).max === 1, 'a short clip gets a single caption');
 ok(CF.util.overlayCountFor(19.9).max === 1, 'just under 20s is still a single caption');
@@ -543,6 +565,18 @@ ok(pk1 !== pk2, 'regenerating content with different wording is treated as a fre
 var pk3 = CF.aiCache.key({ kind: 'policy', fingerprint: 'abc', model: 'm1', contentHash: hashA1 });
 ok(pk1 === pk3, 'reopening the same project with the same content reuses the cached check for free');
 
+section('ai-client — generate cache is keyed on the style examples too');
+var gk1 = CF.aiCache.key({ kind: 'generate', fingerprint: 'abc', model: 'm1', language: 'bm', styleHash: undefined });
+var gk2 = CF.aiCache.key({ kind: 'generate', fingerprint: 'abc', model: 'm1', language: 'bm',
+  styleHash: CF.util.hashString('a real caption') });
+ok(gk1 !== gk2, 'having style examples at all changes the cache key from having none');
+var gk3 = CF.aiCache.key({ kind: 'generate', fingerprint: 'abc', model: 'm1', language: 'bm',
+  styleHash: CF.util.hashString('a different caption') });
+ok(gk2 !== gk3, 'editing Settings to a different example set produces a different key — no stale voice replayed');
+var gk4 = CF.aiCache.key({ kind: 'generate', fingerprint: 'abc', model: 'm1', language: 'bm',
+  styleHash: CF.util.hashString('a real caption') });
+ok(gk2 === gk4, 'the same example set hashes to the same key, so the cache hit still works');
+
 section('ai-client — refuses clearly when it cannot run');
 ok(CF.ai.blockedReason() === null, 'online over http, so AI is available');
 navigator.onLine = false;
@@ -578,6 +612,10 @@ ok(html('#view-queue').includes('Queue is empty'), 'queue empty state renders');
 CF.state.tab = 'settings'; CF.render();
 ok(html('#view-settings').includes('Face-free mode'), 'settings shows the face-free switch');
 ok(html('#view-settings').includes('Saved AI results'), 'settings reports the AI cache');
+ok(html('#view-settings').includes('Caption style examples'), 'settings shows the style examples section');
+ok(html('#view-settings').includes(CF.state.settings.styleExamples[0]), 'the default examples are listed on a fresh install');
+ok(html('#view-settings').includes('Add example'), 'an add-example action is offered');
+ok(html('#view-settings').includes('Reset to defaults'), 'a reset action is offered');
 
 CF.state.tab = 'studio'; CF.state.studioProject = null; CF.render();
 ok(html('#view-studio').includes('No project open'), 'studio survives having no project');

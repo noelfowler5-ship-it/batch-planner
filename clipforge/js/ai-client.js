@@ -125,7 +125,12 @@
          text, so a cache hit must require that exact text, not just the
          same video — regenerating content with different wording is a
          different question to ask, and deserves its own answer. */
-      parts.contentHash || '-'
+      parts.contentHash || '-',
+      /* Only generation needs this: the style examples shape the writing,
+         so a cache hit must require the same examples, not just the same
+         video — editing Settings and generating again should not replay
+         text written for a voice the creator has since changed. */
+      parts.styleHash || '-'
     ].join('|');
   };
 
@@ -194,16 +199,20 @@
 
   /* ------------------------------------------------------------- generation */
 
-  /* opts: { analysis, duration, fingerprint, language, timeBudget, model, force } */
+  /* opts: { analysis, duration, fingerprint, language, timeBudget, model, styleExamples, force } */
   client.generateContent = function (opts) {
     var blocked = client.blockedReason();
     if (blocked) return Promise.reject(new Error(blocked));
+
+    var styleExamples = U.sanitizeStyleExamples(opts.styleExamples);
+    var styleHash = styleExamples.length ? U.hashString(styleExamples.join('\n')) : undefined;
 
     var cacheParts = {
       kind: 'generate',
       fingerprint: opts.fingerprint,
       model: opts.model,
-      language: opts.language
+      language: opts.language,
+      styleHash: styleHash
     };
 
     var lookup = opts.force ? Promise.resolve(null) : cache.get(cacheParts);
@@ -221,7 +230,8 @@
           duration: opts.duration,
           language: opts.language,
           timeBudget: opts.timeBudget,
-          model: opts.model || undefined
+          model: opts.model || undefined,
+          styleExamples: styleExamples
         }
       }).then(function (data) {
         var checked = CF.aiSchema.validateGeneration(data.content, opts.duration, data.language || opts.language);
@@ -234,7 +244,8 @@
           kind: 'generate',
           fingerprint: opts.fingerprint,
           model: data.model,
-          language: opts.language
+          language: opts.language,
+          styleHash: styleHash
         }, checked.value).then(function () {
           return { content: checked.value, cached: false, model: data.model, repairs: checked.repairs };
         });
