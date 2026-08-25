@@ -110,6 +110,23 @@ reads images natively. This is faster, far kinder to a free quota, and avoids
 cross-origin upload uncertainty entirely. Audio-based analysis is a possible
 later upgrade, not a requirement.
 
+### Why every frame can come out black (and the fix)
+
+On some iOS Safari sessions the browser never actually starts decoding a
+freshly loaded `<video>` — every `seeked` event fires right on schedule, but
+the canvas it's drawn to stays black, so the AI correctly reports "no usable
+footage" about a video that plays fine. Two WebKit quirks stack together:
+`seeked` can fire before the target frame has actually been decoded and
+painted, and on a `<video>` that has never played even once, seeking alone
+sometimes never triggers real decoding at all.
+
+`video-engine.js` works around both: before the first seek, it nudges the
+element with a muted `play()` immediately followed by `pause()` (invisible —
+the element is never attached to the DOM) to force the decoder to
+initialize, and after each `seeked` event it waits a few animation frames for
+`readyState >= 2` (a frame is actually ready) before drawing. Both steps
+resolve immediately and cost nothing on browsers that never had the problem.
+
 ### Why canvas + MediaRecorder, not ffmpeg.wasm, for export
 
 ffmpeg.wasm is a ~30 MB download, its fast core needs COOP/COEP headers that
@@ -218,7 +235,9 @@ is interpolated into a URL, so path traversal and query injection are rejected).
 The harness cannot drive a real `<video>`, canvas or network, so these are
 verified by hand:
 
-1. Upload a video → frames appear in the filmstrip
+1. Upload a video → frames appear in the filmstrip, and none of them are
+   solid black (a real bug on some iOS Safari sessions — see "Why every frame
+   can come out black" below)
 2. Reload → the project is still there (the IndexedDB happy path)
 3. **Export** — render a short clip end to end and play the result. This is the
    least-tested path: it depends on `captureStream`, `MediaRecorder` and

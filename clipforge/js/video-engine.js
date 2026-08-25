@@ -69,6 +69,21 @@
     });
   }
 
+  /* Safari (notably iOS) can fire `seeked` before the frame it seeked to has
+     actually been decoded and painted — drawImage right after that event
+     reads a stale or blank canvas. Give the browser a few animation frames
+     to catch up; readyState >= 2 (HAVE_CURRENT_DATA) means a frame is ready. */
+  function waitForPaintedFrame(v) {
+    return new Promise(function (resolve) {
+      var tries = 0;
+      (function poll() {
+        if (v.readyState >= 2 || tries >= 8) return resolve();
+        tries++;
+        requestAnimationFrame(poll);
+      })();
+    });
+  }
+
   function seekTo(v, t) {
     return new Promise(function (resolve) {
       var settled = false;
@@ -77,13 +92,42 @@
         settled = true;
         clearTimeout(timer);
         v.onseeked = null;
-        resolve();
+        waitForPaintedFrame(v).then(resolve);
       };
       /* A failed seek should skip the frame, never hang the whole extraction. */
       var timer = setTimeout(finish, SEEK_TIMEOUT);
       v.onseeked = finish;
       try {
         v.currentTime = Math.max(0, t);
+      } catch (e) {
+        finish();
+      }
+    });
+  }
+
+  /* iOS Safari has been seen to never actually start decoding a freshly
+     loaded <video> — every subsequent seek reports "seeked" but the canvas
+     stays black — until playback has run at least once. A muted play()
+     immediately followed by pause() forces the decoder to initialize
+     without ever visibly playing anything, and is a no-op cost on browsers
+     that did not need it. */
+  function primeDecoder(v) {
+    return new Promise(function (resolve) {
+      if (v.readyState >= 2) return resolve();
+      var settled = false;
+      var timer = setTimeout(finish, 2000);
+      function finish() {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { v.pause(); } catch (e) { /* ignore */ }
+        resolve();
+      }
+      v.addEventListener('canplay', finish, { once: true });
+      v.addEventListener('loadeddata', finish, { once: true });
+      try {
+        var p = v.play();
+        if (p && typeof p.catch === 'function') p.catch(function () { /* autoplay refused, still fine */ });
       } catch (e) {
         finish();
       }
@@ -125,7 +169,7 @@
       var use = meta || m;
       var canvas = fitCanvas(document.createElement('canvas'), use.width, use.height, 240);
       var at = Math.min(use.duration / 3, Math.max(0.4, use.duration * 0.1));
-      return seekTo(v, at).then(function () {
+      return primeDecoder(v).then(function () { return seekTo(v, at); }).then(function () {
         try {
           canvas.getContext('2d').drawImage(v, 0, 0, canvas.width, canvas.height);
           var out = canvas.toDataURL('image/jpeg', 0.7);
@@ -161,7 +205,7 @@
 
       /* Sequential, not parallel: one <video> element can only be at one
          currentTime, and parallel decode of a large file thrashes memory. */
-      var chain = Promise.resolve();
+      var chain = primeDecoder(v);
       times.forEach(function (t, i) {
         chain = chain.then(function () {
           return seekTo(v, t).then(function () {
