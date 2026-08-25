@@ -70,19 +70,70 @@
   }
 
   /* Safari (notably iOS) can fire `seeked` before the frame it seeked to has
-     actually been decoded and painted — drawImage right after that event
-     reads a stale or blank canvas. Give the browser a few animation frames
-     to catch up; readyState >= 2 (HAVE_CURRENT_DATA) means a frame is ready. */
-  function waitForPaintedFrame(v) {
+     actually been decoded and presented — drawImage right after that event
+     reads a stale or blank canvas.
+
+     requestVideoFrameCallback is the only API that says "a new frame is now
+     available to draw", which is exactly the question being asked here.
+     readyState is NOT a substitute: it stays at HAVE_ENOUGH_DATA straight
+     through a seek, so polling it answers nothing. Where rVFC is missing,
+     two animation frames is the honest best-effort fallback. */
+  function waitForNextFrame(v) {
     return new Promise(function (resolve) {
-      var tries = 0;
-      (function poll() {
-        if (v.readyState >= 2 || tries >= 8) return resolve();
-        tries++;
-        requestAnimationFrame(poll);
-      })();
+      var settled = false;
+      var finish = function () {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      var timer = setTimeout(finish, 400);
+
+      if (typeof v.requestVideoFrameCallback === 'function') {
+        try {
+          v.requestVideoFrameCallback(function () { finish(); });
+          return;
+        } catch (e) { /* fall through to the rAF path */ }
+      }
+      requestAnimationFrame(function () { requestAnimationFrame(finish); });
     });
   }
+
+  /* Brightest pixel in a coarse sample of the canvas.
+
+     Used to catch the failure this whole file exists to avoid: frames that
+     decode "successfully" but come out solid black. Max luma, not mean —
+     genuinely dark footage still contains highlights, so mean would flag a
+     night shot as broken while max only fires when there is nothing there
+     at all. Returns null when the canvas cannot be read, which means
+     "unknown", never "black". */
+  /* Pure half, exposed so it can be tested against known pixels without a
+     real canvas. Takes RGBA bytes, returns null for "nothing to measure". */
+  engine.peakLumaFrom = function (data) {
+    if (!data || !data.length) return null;
+    var peak = 0;
+    /* Step over whole pixels, ~2000 samples max: enough to spot any real
+       image, cheap enough to run on every frame on a phone. */
+    var stride = Math.max(4, Math.floor(data.length / 4 / 2000) * 4);
+    for (var i = 0; i < data.length; i += stride) {
+      var luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+      if (luma > peak) peak = luma;
+    }
+    return peak;
+  };
+
+  function peakLuma(ctx, w, h) {
+    if (!ctx || typeof ctx.getImageData !== 'function') return null;
+    try {
+      return engine.peakLumaFrom(ctx.getImageData(0, 0, w, h).data);
+    } catch (e) {
+      return null;   // tainted canvas, or no pixels available
+    }
+  }
+
+  /* Below this, a frame has no visible content at all (0-255 scale). */
+  var BLACK_PEAK = 12;
+  engine.BLACK_PEAK = BLACK_PEAK;
 
   function seekTo(v, t) {
     return new Promise(function (resolve) {
@@ -92,7 +143,7 @@
         settled = true;
         clearTimeout(timer);
         v.onseeked = null;
-        waitForPaintedFrame(v).then(resolve);
+        waitForNextFrame(v).then(resolve);
       };
       /* A failed seek should skip the frame, never hang the whole extraction. */
       var timer = setTimeout(finish, SEEK_TIMEOUT);
@@ -206,11 +257,18 @@
       /* Sequential, not parallel: one <video> element can only be at one
          currentTime, and parallel decode of a large file thrashes memory. */
       var chain = primeDecoder(v);
+      var blackCount = 0;
+      var measured = 0;
       times.forEach(function (t, i) {
         chain = chain.then(function () {
           return seekTo(v, t).then(function () {
             try {
               ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+              var peak = peakLuma(ctx, canvas.width, canvas.height);
+              if (peak !== null) {
+                measured++;
+                if (peak < BLACK_PEAK) blackCount++;
+              }
               frames.push({ t: U.round(t, 2), dataUrl: canvas.toDataURL('image/jpeg', quality) });
             } catch (e) {
               /* A frame that refuses to draw is skipped, not fatal. */
@@ -223,7 +281,18 @@
       return chain.then(function () {
         cleanup();
         if (!frames.length) throw new Error('No frames could be read from this video.');
-        return { frames: frames, meta: meta, width: canvas.width, height: canvas.height };
+        return {
+          frames: frames,
+          meta: meta,
+          width: canvas.width,
+          height: canvas.height,
+          /* Reported, not thrown: the caller decides what to do about it.
+             `allBlack` stays false when nothing could be measured, so an
+             unreadable canvas never masquerades as a black video. */
+          blackFrames: blackCount,
+          measuredFrames: measured,
+          allBlack: measured > 0 && blackCount === measured
+        };
       });
     }).catch(function (err) {
       cleanup();
@@ -253,6 +322,9 @@
     }).then(function (res) {
       out.frames = res.frames;
       out.frameSize = { width: res.width, height: res.height };
+      out.blackFrames = res.blackFrames;
+      out.measuredFrames = res.measuredFrames;
+      out.allBlack = res.allBlack;
       report('done');
       return out;
     });

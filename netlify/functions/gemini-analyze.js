@@ -9,7 +9,7 @@
 
 import { guard, json, fail, readJsonBody, resolveModel, framesToParts, callGemini } from './lib/gemini.mjs';
 
-export const PROMPT_VERSION = 1;
+export const PROMPT_VERSION = 2;
 
 const SYSTEM = `You are an expert short-form video editor who plans faceless TikTok product videos for a Malaysian affiliate creator. The product varies by clip — it could be a kitchen gadget, a skincare item, a fashion accessory, a phone gadget, fitness gear, anything physical sold on TikTok Shop — so judge every clip from what the frames actually show, never from an assumed category.
 

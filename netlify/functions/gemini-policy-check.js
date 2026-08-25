@@ -15,7 +15,7 @@
 
 import { guard, json, fail, readJsonBody, resolveModel, framesToParts, callGemini } from './lib/gemini.mjs';
 
-export const PROMPT_VERSION = 1;
+export const PROMPT_VERSION = 2;
 
 const SYSTEM = `You are a content-safety reviewer helping a Malaysian TikTok affiliate creator self-check a video BEFORE posting it, so they can fix or soften anything risky ahead of time.
 

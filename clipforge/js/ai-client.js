@@ -23,8 +23,15 @@
   };
 
   /* Bump when a prompt changes meaningfully — it invalidates cached results
-     without touching anything else. Must match the functions' PROMPT_VERSION. */
-  client.PROMPT_VERSION = 1;
+     without touching anything else. Must match the functions' PROMPT_VERSION.
+
+     v2: a frame-extraction bug could produce all-black frames, so any
+     analysis cached before this point may describe a black screen rather
+     than the actual video. Re-uploading the same file reproduces the same
+     fingerprint and would have replayed that stale verdict forever, with
+     no way for the user to tell it was cached. Bumping retires those
+     entries; correct results simply cost one re-analysis. */
+  client.PROMPT_VERSION = 2;
 
   var TIMEOUT_MS = 90000;
 

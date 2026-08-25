@@ -4,7 +4,7 @@
    deletes every other cache, which is what forces an installed app to pick up
    the new version instead of serving the old one forever. */
 
-const CACHE_NAME = 'clipforge-v9';
+const CACHE_NAME = 'clipforge-v10';
 
 const FILES_TO_CACHE = [
   './',

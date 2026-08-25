@@ -38,6 +38,24 @@ ok(fpA !== fpC, 'fingerprint differs for a different file');
 ok(CF.util.isVideoFile({ name: 'a.MOV', type: '' }) === true, 'extension fallback catches MIME-less pickers');
 ok(CF.util.isVideoFile({ name: 'notes.pdf', type: 'application/pdf' }) === false, 'rejects a non-video');
 
+section('video-engine — spotting frames that decoded to solid black');
+function pixels(n, r, g, b) {
+  var out = [];
+  for (var i = 0; i < n; i++) { out.push(r, g, b, 255); }
+  return out;
+}
+var pureBlack = CF.video.peakLumaFrom(pixels(400, 0, 0, 0));
+ok(pureBlack === 0, 'an all-black frame peaks at zero luma');
+ok(pureBlack < CF.video.BLACK_PEAK, 'an all-black frame is below the blank threshold');
+ok(CF.video.peakLumaFrom(pixels(400, 255, 255, 255)) > 250, 'a white frame peaks near maximum');
+/* Real footage shot in the dark must NOT be mistaken for a decode failure:
+   it is dark on average but still contains highlights. */
+var nightScene = pixels(400, 4, 4, 4).concat(pixels(4, 180, 170, 160));
+ok(CF.video.peakLumaFrom(nightScene) > CF.video.BLACK_PEAK,
+   'genuinely dark footage with highlights is not flagged as blank');
+ok(CF.video.peakLumaFrom([]) === null, 'no pixels reads as unknown, not as black');
+ok(CF.video.peakLumaFrom(null) === null, 'null pixels read as unknown, not as black');
+
 section('project — shape, defaults, migration');
 var p = CF.project.create({ name: 'Chopper' });
 ok(p.status === 'RAW', 'a new project starts at RAW');

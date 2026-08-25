@@ -120,12 +120,42 @@ footage" about a video that plays fine. Two WebKit quirks stack together:
 painted, and on a `<video>` that has never played even once, seeking alone
 sometimes never triggers real decoding at all.
 
-`video-engine.js` works around both: before the first seek, it nudges the
-element with a muted `play()` immediately followed by `pause()` (invisible —
-the element is never attached to the DOM) to force the decoder to
-initialize, and after each `seeked` event it waits a few animation frames for
-`readyState >= 2` (a frame is actually ready) before drawing. Both steps
-resolve immediately and cost nothing on browsers that never had the problem.
+`video-engine.js` works around both: before the first seek it nudges the
+element with a muted `play()`/`pause()` (invisible — the element is never
+attached to the DOM) to force the decoder to initialize, and after each
+`seeked` event it waits on **`requestVideoFrameCallback`**, the only API that
+actually reports "a new frame is now available to draw", falling back to two
+animation frames where that is unavailable. Both resolve immediately and cost
+nothing on browsers that never had the problem.
+
+Note that `readyState` is *not* usable here, though it looks like it should
+be: it stays at `HAVE_ENOUGH_DATA` straight through a seek, so polling it
+answers nothing. An earlier version of this fix did exactly that and was a
+no-op.
+
+Because a silent version of this bug is so hard to spot from the outside —
+the AI faithfully reports "solid black screen, no usable footage" about a
+video that plays perfectly — extraction now also *measures* what it drew.
+Each frame's peak luma is sampled from the canvas, and an all-black set is
+reported to the user directly instead of being sent to Gemini. Peak rather
+than mean, so genuinely dark footage (which still has highlights) is never
+mistaken for a decode failure; an unreadable canvas reports "unknown", never
+"black".
+
+### The AI cache can outlive the bug that poisoned it
+
+Cache keys are `fingerprint + prompt version + model + language`, and the
+fingerprint is derived from the file itself (`name + size + lastModified +
+duration`). Re-uploading the same file therefore reproduces the same key and
+replays the stored verdict **without calling the API at all** — which is the
+intended behaviour, and exactly what keeps this inside a free tier.
+
+The trap: if a result was cached while extraction was broken, re-uploading
+the video can never fix it, because the fix never gets to run. The escape
+hatch is `PROMPT_VERSION` in `ai-client.js` (mirrored in the three functions)
+— bumping it retires every existing entry at the cost of one re-analysis.
+**Bump it whenever a bug may have poisoned stored results**, not only when a
+prompt changes. Per-project, "Analyse again" forces a single bypass.
 
 ### Why canvas + MediaRecorder, not ffmpeg.wasm, for export
 
@@ -210,7 +240,7 @@ installed copies keep serving the old version.
 
 ```
 cd clipforge
-node test/run.cjs      # 273 assertions — browser app
+node test/run.cjs      # 279 assertions — browser app
 node test/server.mjs   #  26 assertions — Netlify proxy helpers
 ```
 

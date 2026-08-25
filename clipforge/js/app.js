@@ -186,7 +186,16 @@
         fingerprint: U.videoFingerprint(file, result.meta.duration)
       };
       render();
-      ui.toast(result.frames.length + ' frames ready', 'ok');
+      if (result.allBlack) {
+        /* Say this here rather than letting the AI discover it: the frames
+           are all the AI ever sees, so an all-black set means every verdict
+           downstream would describe a black screen instead of the video. */
+        ui.toast('Every frame came out black, even though the video itself may be fine. '
+               + 'This is a browser decoding problem, not your clip. Try Chrome, or re-save the '
+               + 'video from your photo app first.', 'err');
+      } else {
+        ui.toast(result.frames.length + ' frames ready', 'ok');
+      }
     }).catch(function (err) {
       state.ingest.active = false;
       state.draft = null;

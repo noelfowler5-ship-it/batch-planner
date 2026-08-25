@@ -10,7 +10,7 @@
 
 import { guard, json, fail, readJsonBody, resolveModel, callGemini } from './lib/gemini.mjs';
 
-export const PROMPT_VERSION = 1;
+export const PROMPT_VERSION = 2;
 
 /* GOOD/BAD lines below are tone references, not templates — they show the
    register (casual, direct) to write in, not the product to write about.
