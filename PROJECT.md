@@ -15,12 +15,14 @@ This repo hosts two independent applications for **@ultramain** (kitchen-gadget 
    - Upload clip → Gemini scene plan + score → edit captions/hooks/voiceover → export 9:16
    - Non-shared code; read `clipforge/README.md` before touching
 
-Both share `netlify/functions/` but do NOT share code. Changes to one must not break the other.
+`netlify/functions/` now holds only ClipForge's Gemini proxies — Batch Planner has **no
+TikTok API integration and makes no server calls of its own** (see "TikTok API — removed"
+below). Changes to one app must not break the other.
 
 ## Tech Stack
 
 - **Front end**: vanilla JS (no framework), Tailwind CSS via CDN, service worker for offline
-- **Back end**: six Netlify serverless functions (TikTok OAuth/login/stats/upload/logout)
+- **Back end**: `netlify/functions/` — ClipForge's Gemini proxies only; Batch Planner is pure client-side
 - **Data**: localStorage + IndexedDB (videos stored as blobs + thumbnails)
 - **Deployment**: git-push-to-deploy (Netlify auto-build on push)
 - **No CI, no linter, no build step**
@@ -51,10 +53,13 @@ Both share `netlify/functions/` but do NOT share code. Changes to one must not b
 - `getPlan(weekKey, create)` lazily builds/fetches per ISO week
 - `currentWeekKey()` / `mondayOf()` for date math
 
-**Performance Tracking**
-- `state.logs` fed by manual CSV import (fuzzy-match TikTok export columns via `COLMAP`)
-- Live sync via `ttSync()` / `ttFetch()` (optional, if TikTok connected)
+**Performance Tracking** (manual-only — no TikTok API)
+- `state.logs` fed by two paths, both user-driven, no live API sync:
+  - **CSV import**: fuzzy-matches TikTok Studio export columns via `COLMAP` (includes `gmv` now, alongside views/likes/comments/shares/orders)
+  - **Manual entry**: `manualLogForm()` — type a single post's stats by hand, including GMV
+- Both paths match rows to saved products via the video's `tiktokId` field (a user-entered TikTok post ID, kept purely for matching — nothing to do with the removed API)
 - `angleStats()` / `bestAngle()` compute best-performing hook/TOC angle
+- `exportCSV()` includes `gmv` column for backup/analysis outside the app
 
 **Learning Tab**
 - Static content: `LESSONS` constant array (chapters → sections → blocks: p/list/table/code/rule)
@@ -62,34 +67,30 @@ Both share `netlify/functions/` but do NOT share code. Changes to one must not b
 - `renderLearningOverview()` shows chapters + progress; `renderLearningChapter()` shows full section
 - State: `state.learning` = {sectionId: true} map, persistent in storage
 
-### TikTok Integration (`netlify/functions/*.js`)
+### TikTok API — removed (2026-08-31)
 
-Six independent functions, each fully self-contained (repeats ~50 lines of helpers rather than importing shared module).
+Batch Planner previously had six Netlify functions for TikTok OAuth login, stats sync,
+and direct-from-browser video upload. **All six were deleted** (`tiktok-login.js`,
+`tiktok-callback.js`, `tiktok-me.js`, `tiktok-stats.js`, `tiktok-upload-init.js`,
+`tiktok-logout.js`), along with every UI touchpoint in `index.html` (`state.tt`,
+`ttFetch/ttCheck/ttLogout/ttSync/ttUpload/ttPanel`, the "Connect TikTok"/"Send clip to
+TikTok" buttons, the `?tt=connected` redirect handler).
 
-| File | Path | Purpose |
-|---|---|---|
-| `tiktok-login.js` | `/api/tiktok/login` | Redirects to TikTok OAuth, sets CSRF `tt_state` cookie |
-| `tiktok-callback.js` | `/auth/callback` | Exchanges code for tokens, sets HttpOnly cookies |
-| `tiktok-me.js` | `/api/tiktok/me` | Connection status + username |
-| `tiktok-stats.js` | `/api/tiktok/stats` | Recent post metrics (sync stats button) |
-| `tiktok-upload-init.js` | `/api/tiktok/upload-init` | Returns TikTok `upload_url` |
-| `tiktok-logout.js` | `/api/tiktok/logout` | Revokes token, clears cookies |
+**Why**: the upload flow's core assumption — that a browser can `PUT` video bytes
+directly to TikTok's Content Posting API — was never verified (see CURRENT.md history:
+the verification session hit both a missing TikTok account and an environment that
+couldn't reach TikTok's network at all). Rather than resolve that, the user decided to
+drop the API integration entirely: post manually via TikTok's own app, bring
+performance numbers back in by hand.
 
-**Token Model**
-- HttpOnly, Secure, SameSite=Lax cookies: `tt_access`, `tt_refresh`, `tt_exp`
-- Never touched by front-end JS; never persisted server-side
-- `getToken()` transparently refreshes when `tt_exp` near
+**What replaced it**: the CSV-import / manual-log paths that already existed alongside
+the API (see Performance Tracking above) are now the *only* way data gets in — nothing
+was rebuilt, they just stopped being the fallback and became the primary path. The
+video's `tiktokId` field (used to match a CSV row / manual log entry to the right
+product) was **kept** — it's a user-typed value, unrelated to the removed OAuth flow.
 
-**Upload Flow** (two-step by design)
-- Browser calls `tiktok-upload-init.js` → gets `upload_url` from TikTok
-- Browser does direct `PUT` of video bytes to TikTok (not through serverless function)
-- Rationale: keeps large files off serverless payload limit
-- **Caveat**: If TikTok rejects direct-from-browser PUTs (CORS), route bytes through function instead
-
-**Env Vars** (Netlify site config, never committed)
-- `TIKTOK_CLIENT_KEY`
-- `TIKTOK_CLIENT_SECRET`
-- `TIKTOK_REDIRECT_URI`
+`privacy.html` already stated "not currently implemented" for TikTok account access —
+that line was stale while the API existed and is accurate again now.
 
 ### ClipForge AI (`clipforge/`)
 
@@ -102,9 +103,7 @@ See `clipforge/README.md` for architectural details. Key points:
 
 1. **Service Worker Cache**: If you edit `index.html`, bump `CACHE_NAME` in `service-worker.js` (e.g., `v3` → `v4`). Phones with app installed will otherwise keep serving old version indefinitely.
 
-2. **Function Deduplication**: Helper code (`readCookies`, `cookie`, `clear`, `json`, `refreshToken`, `getToken`) is copy-pasted across all six TikTok functions. **A fix to shared logic must be applied to all six files**, not just one.
-
-3. **Protected Files** (must not delete or move)
+2. **Protected Files** (must not delete or move)
    - `tiktoki9V4P24zCg4MLfNepik5XiPo2NTlZ0Vd.txt` — TikTok domain-ownership verification (breaks URL verification if removed)
    - `privacy.html` / `terms.html` — URLs registered with TikTok app review and linked from footer
 
@@ -112,18 +111,15 @@ See `clipforge/README.md` for architectural details. Key points:
 
 ## Running / Deploying
 
-- **Local front-end work**: Open `index.html` directly in browser (TikTok panel disabled outside https)
-- **Local serverless work**: Need Netlify CLI (`netlify dev`); check with user before adding setup
+- **Local front-end work**: Open `index.html` directly in browser — fully functional, no API/server dependency at all now
+- **Local serverless work**: Only relevant for ClipForge (Gemini proxies); needs Netlify CLI (`netlify dev`), check with user before adding setup
 - **Deploy**: git-push-to-deploy → Netlify auto-builds (build command empty; publish dir `.`; functions dir `netlify/functions`)
 
 ## Roadmap & Known Issues
 
-### To Verify
-- **TikTok upload-from-browser CORS**: Confirm browser-direct PUT to TikTok works. If rejected, route bytes through `tiktok-upload-init.js` instead of direct PUT.
-
 ### Future Enhancements
-- Consider CLI tooling for local Netlify function testing (low priority; currently manual via netlify dev)
 - Monitor ClipForge Gemini API costs; document frame-sending strategy trade-offs
+- If demand ever justifies revisiting a TikTok API integration, re-read the removed section's history in CURRENT.md first — the CORS/OAuth unknowns that caused it to be dropped haven't changed
 
 ## Content / Tone
 
@@ -133,6 +129,12 @@ User-facing generated copy (captions, TOC scripts) targets Malaysian creator mix
 - `TAGMETA` pain/ben fields: `pain` = noun phrase, `ben` = predicate
 - Hook templates in `makeHook()` assume this shape
 - Any edit must preserve grammatical role
+
+**Compliance invariant** (critical — TikTok Community Guidelines / Content Posting policy):
+- Every generated caption includes a plain-language paid-promotion/affiliate disclosure line (`disclosureLine()`), placed right under the hook — not buried at the end, not hashtag-only. TikTok's Branded Content policy treats a hashtag alone as insufficient disclosure.
+- `proofLine()` (captions) and `tocElement('proof', ...)` (TOC) must never assert unverifiable sales/popularity facts ("many have bought", "repeat buyers love it") — that's a fabricated-social-proof pattern TikTok's policies (and ClipForge's own `gemini-policy-check.js` heuristics, for reference) both flag. Point to TikTok Shop's own real reviews instead, or say nothing.
+- `p.limited` (stock-scarcity claim) is acceptable because it's a user-truthful field the creator sets themselves — the generator never invents scarcity/urgency on its own.
+- Any new caption/TOC copy must be checked against these three rules before shipping.
 
 ---
 

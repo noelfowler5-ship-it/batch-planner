@@ -295,13 +295,16 @@ function buildHashtags(p) {
   out.push('#TikTokShopMalaysia');
   return out.slice(0, 5).join(' ');
 }
+/* Points viewers to TikTok Shop's own review data rather than asserting sales/reorder
+   numbers we can't actually verify — TikTok's policies (and basic honesty) don't allow
+   claiming popularity or repeat-purchase facts the creator has no way to back up. */
 function proofLine(p, lang) {
   if (p.limited) return lang === 'en' ? 'Limited stock on this one — grab it before it goes.'
                        : lang === 'mix' ? 'Stok limited je — jangan tunggu lama.'
                        : 'Stok terhad — jangan tunggu lama.';
-  const bm = ['Ramai yang dah beli & repeat order.', 'Review dalam TikTok Shop pun okay.', 'Bukan barang baru — memang laris.'];
-  const en = ['Loads of repeat buyers on this one.', 'Reviews on TikTok Shop speak for themselves.', 'People keep re-ordering this.'];
-  const mx = ['Ramai dah beli & repeat order — check reviews.', 'Review dalam TikTok Shop memang okay.'];
+  const bm = ['Review dalam TikTok Shop pun okay.', 'Semak review sebenar dalam TikTok Shop dulu.'];
+  const en = ['Reviews on TikTok Shop speak for themselves.', 'Check the real buyer reviews in TikTok Shop.'];
+  const mx = ['Review dalam TikTok Shop memang okay.', 'Check real reviews dalam TikTok Shop.'];
   return lang === 'en' ? pick(en) : lang === 'mix' ? pick(mx) : pick(bm);
 }
 function makeHook(p, hook, lang) {
@@ -326,6 +329,15 @@ function makeHook(p, hook, lang) {
   if (lang === 'mix') return 'Wait, RM' + price + ' je?! Murah dari lunch aku.';
   return 'Biar betul RM' + price + ' je?!';
 }
+/* TikTok's Commercial/Branded Content policy requires clear, conspicuous disclosure
+   of paid/affiliate promotion — a hashtag alone isn't considered sufficient, so this
+   is a plain-language line placed right under the hook (before anyone has to tap
+   "more"), not buried at the end with the hashtags. */
+function disclosureLine(lang) {
+  if (lang === 'en') return 'Ad/Affiliate — I may earn a small commission if you buy through this link.';
+  if (lang === 'mix') return 'Ad/Affiliate — saya dapat small commission kalau anda beli through link ni.';
+  return 'Iklan/Affiliate — saya dapat komisen kecil jika anda beli melalui pautan ini.';
+}
 function generateCaptions(p, lang) {
   lang = lang || 'bm';
   return HOOKS.map(h => {
@@ -338,7 +350,7 @@ function generateCaptions(p, lang) {
     body.push(proofLine(p, lang));
     if (p.promo && !discountPct(p.promo)) body.push(String(p.promo).trim());
     return { hook: h.key, lang: lang, text: [
-      hook, '', body.join('\n'), '',
+      hook, disclosureLine(lang), '', body.join('\n'), '',
       'Tekan beg kuning tengok harga 👇',
       '(Disclaimer: Harga tertakluk pada promosi semasa)', '',
       buildHashtags(p)
@@ -429,7 +441,7 @@ function tocElement(kind, p, angle, lang) {
       return lang === 'en' ? ('Only RM' + price) : ('Harga RM' + price + ' je');
     case 'proof':
       if (p.limited) return lang === 'en' ? 'Limited stock' : 'Stok terhad';
-      return lang === 'en' ? 'Repeat buyers love it' : 'Ramai dah repeat order';
+      return lang === 'en' ? 'Check reviews in-app' : 'Tengok review dalam app';
     case 'cta':     return lang === 'en' ? 'Tap the yellow bag 👇' : 'Tekan beg kuning tengok harga';
   }
   return '';
@@ -646,6 +658,7 @@ const COLMAP = {
   comments:['comments','comment','total comments','komen'],
   shares:  ['shares','share','total shares','kongsi'],
   orders:  ['orders','order','items sold','sku orders','units sold','pesanan'],
+  gmv:     ['gmv','est gmv','est. gmv','estimated gmv','total gmv','gross merchandise value','jumlah gmv'],
   date:    ['create_date','createdate','create time','created','date','post time','publish time','posted','tarikh']
 };
 function mapHeaders(header) {
@@ -714,119 +727,6 @@ function bestAngle(logs, field) {
   let best = null;
   Object.keys(s).forEach(k => { if (s[k].n > 0 && (!best || s[k].avgViews > s[best].avgViews)) best = k; });
   return best ? { key: best, avgViews: s[best].avgViews, n: s[best].n } : null;
-}
-
-/* =========================================================================
-   TIKTOK CONNECTION  (talks to the serverless functions in netlify/functions)
-   Everything here is optional — if the functions aren't deployed, or you're
-   offline, these calls fail quietly and the app keeps working exactly as before.
-   ========================================================================= */
-state.tt = { connected: false, username: '', checked: false, busy: false };
-
-async function ttFetch(path, opts) {
-  const r = await fetch(path, Object.assign({ credentials: 'same-origin' }, opts || {}));
-  const ct = r.headers.get('content-type') || '';
-  if (!ct.includes('application/json')) throw new Error('Server did not return JSON — are the functions deployed?');
-  return r.json();
-}
-async function ttCheck(quiet) {
-  try {
-    const d = await ttFetch('/api/tiktok/me');
-    state.tt.connected = !!d.connected;
-    state.tt.username = d.username || '';
-  } catch (e) {
-    state.tt.connected = false;
-    if (!quiet) toast('Could not reach TikTok connection', 'warn');
-  }
-  state.tt.checked = true;
-  render();
-}
-async function ttLogout() {
-  try { await ttFetch('/api/tiktok/logout', { method: 'POST' }); } catch (e) {}
-  state.tt.connected = false; state.tt.username = '';
-  render(); toast('Disconnected from TikTok');
-}
-/* Pull recent post metrics and merge them into the performance log, matching on
-   the TikTok video id. Same shape as a CSV import, just without the CSV. */
-async function ttSync() {
-  if (state.tt.busy) return;
-  state.tt.busy = true; render();
-  try {
-    const d = await ttFetch('/api/tiktok/stats');
-    if (d.error) { toast('TikTok: ' + d.error, 'err'); return; }
-    let added = 0, updated = 0, unmatched = 0;
-    (d.videos || []).forEach(v => {
-      const match = findByTiktokId(v.id);
-      const dupe = state.logs.find(l => l.tiktokId === v.id && l.date === v.date);
-      if (dupe) {
-        Object.assign(dupe, { views: v.views, likes: v.likes, comments: v.comments, shares: v.shares });
-        updated++;
-      } else if (match) {
-        const hist = historyForDate(match.v, v.date);
-        state.logs.push({
-          id: uid(), productId: match.p.id, videoId: match.v.id, tiktokId: v.id,
-          hook: (hist && hist.hook) || 'unknown', toc: (hist && hist.toc) || 'unknown',
-          date: v.date, views: v.views, likes: v.likes, comments: v.comments,
-          shares: v.shares, orders: 0, source: 'tiktok'
-        });
-        added++;
-      } else unmatched++;
-    });
-    state.settings.lastImport = ymd(new Date());
-    saveAll();
-    toast('Synced · ' + added + ' new, ' + updated + ' updated' + (unmatched ? ', ' + unmatched + ' unmatched' : ''));
-  } catch (e) {
-    toast(e.message || 'Sync failed', 'err');
-  } finally {
-    state.tt.busy = false; render();
-  }
-}
-/* Send a clip to TikTok. The function hands back an upload URL and the browser
-   PUTs the bytes straight to TikTok, so the video never passes through the server. */
-async function ttUpload(pid, vid) {
-  if (state.tt.busy) return;
-  const rec = await idbGet(vid);
-  if (!rec || !rec.blob) { toast('No video file stored for this clip', 'warn'); return; }
-  state.tt.busy = true; render();
-  try {
-    const init = await ttFetch('/api/tiktok/upload-init', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ video_size: rec.blob.size })
-    });
-    if (init.error) { toast('TikTok: ' + init.error, 'err'); return; }
-    toast('Uploading to TikTok…');
-    const put = await fetch(init.upload_url, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': rec.blob.type || 'video/mp4',
-        'Content-Range': 'bytes 0-' + (rec.blob.size - 1) + '/' + rec.blob.size
-      },
-      body: rec.blob
-    });
-    if (!put.ok) { toast('Upload failed (' + put.status + ')', 'err'); return; }
-    toast('Sent ✓ Open your TikTok notifications to finish the post');
-  } catch (e) {
-    toast(e.message || 'Upload failed', 'err');
-  } finally {
-    state.tt.busy = false; render();
-  }
-}
-function ttPanel() {
-  if (!state.tt.checked) return '';
-  if (!state.tt.connected) {
-    return '<div class="bg-white border border-stone-200 rounded-2xl p-4 mb-4">' +
-      '<h3 class="font-bold text-[14px]">Connect TikTok</h3>' +
-      '<p class="text-[12px] text-stone-500 mt-1 mb-3 leading-snug">Connect your account to sync post stats automatically and send clips straight to TikTok — no CSV export needed.</p>' +
-      '<a href="/api/tiktok/login" class="tap w-full bg-stone-900 text-white rounded-xl text-[13px] font-semibold flex items-center justify-center">Log in with TikTok</a></div>';
-  }
-  return '<div class="bg-white border border-emerald-300 rounded-2xl p-4 mb-4">' +
-    '<div class="flex items-center justify-between gap-2">' +
-      '<div class="min-w-0"><div class="text-[11px] font-bold text-emerald-700 uppercase tracking-wide">TikTok connected</div>' +
-      '<div class="font-bold text-[14px] truncate">' + esc(state.tt.username || 'your account') + '</div></div>' +
-      '<button data-action="tt-logout" class="text-[11px] font-semibold text-stone-500 underline shrink-0">Disconnect</button></div>' +
-    '<button data-action="tt-sync" class="tap w-full mt-3 bg-stone-900 text-white rounded-xl text-[13px] font-semibold"' + (state.tt.busy ? ' disabled' : '') + '>' +
-      (state.tt.busy ? 'Working…' : '⟳ Sync stats from TikTok') + '</button></div>';
 }
 
 /* =========================================================================
@@ -938,9 +838,6 @@ function renderPlan() {
             '<span class="flex-1 text-[12.5px] leading-snug text-stone-800">' + esc(line) + '</span></div>').join('') +
         '</div>' +
         '<button data-action="copy-toc" data-p="' + p.id + '" data-v="' + v.id + '" data-a="' + tocAngle + '" class="tap w-full mt-2 bg-teal-700 text-white rounded-xl text-[13px] font-semibold">Copy all TOC</button>' +
-        (state.tt.connected && v.hasFile
-          ? '<button data-action="tt-upload" data-p="' + p.id + '" data-v="' + v.id + '" class="tap w-full mt-2 border border-stone-900 text-stone-900 rounded-xl text-[13px] font-semibold"' + (state.tt.busy ? ' disabled' : '') + '>⬆ Send clip to TikTok</button>'
-          : '') +
         (s.scheduled
           ? '<button data-action="unschedule" data-i="' + i + '" class="tap w-full mt-2 border border-stone-300 rounded-xl text-[12px] font-semibold text-stone-500">Undo scheduled</button>'
           : '<button data-action="schedule" data-i="' + i + '" class="tap w-full mt-2 bg-emerald-600 text-white rounded-xl text-[13px] font-semibold">✓ Mark slot as scheduled</button>') +
@@ -971,7 +868,7 @@ function hydrateThumbs() {
    ========================================================================= */
 function renderPerf() {
   const logs = state.logs.slice();
-  let h = reminderBanner() + ttPanel();
+  let h = reminderBanner();
 
   h += '<div class="grid grid-cols-2 gap-2 mb-2">' +
     '<button data-action="import-csv" class="tap bg-stone-900 text-white rounded-xl text-[13px] font-semibold px-2">⬆ Import CSV</button>' +
@@ -988,6 +885,7 @@ function renderPerf() {
     const bh = bestAngle(logs, 'hook'), bt = bestAngle(logs, 'toc');
     const hStats = angleStats(logs, 'hook');
     const totalOrders = logs.reduce((a, l) => a + (l.orders || 0), 0);
+    const totalGmv = logs.reduce((a, l) => a + (l.gmv || 0), 0);
     const withEr = logs.filter(l => er(l) != null);
     h += '<div class="bg-stone-900 text-white rounded-2xl p-4 mb-4">' +
       '<div class="grid grid-cols-2 gap-3">' +
@@ -1003,6 +901,7 @@ function renderPerf() {
         '<div><div class="text-[16px] font-bold">' + fmt(Math.round(logs.reduce((a, l) => a + (l.views || 0), 0) / logs.length)) + '</div><div class="text-[10px] text-stone-400">avg views</div></div>' +
         '<div><div class="text-[16px] font-bold">' + (withEr.length ? (withEr.reduce((a, l) => a + er(l), 0) / withEr.length).toFixed(1) + '%' : '—') + '</div><div class="text-[10px] text-stone-400">avg ER</div></div></div>' +
       (totalOrders > 0 ? '<div class="mt-3 text-[12px] bg-white/10 rounded-lg px-3 py-2">🛒 Orders per post: <b>' + (totalOrders / logs.length).toFixed(2) + '</b> <span class="text-stone-400">(' + totalOrders + ' total)</span></div>' : '') +
+      (totalGmv > 0 ? '<div class="mt-2 text-[12px] bg-white/10 rounded-lg px-3 py-2">💰 GMV per post: <b>RM' + (totalGmv / logs.length).toFixed(2) + '</b> <span class="text-stone-400">(RM' + totalGmv.toFixed(2) + ' total)</span></div>' : '') +
     '</div>';
 
     if (logs.length >= 5) {
@@ -1088,7 +987,6 @@ function renderPerf() {
     '<button data-action="export-csv" class="tap w-full mb-2 border border-stone-300 rounded-xl text-[13px] font-semibold">⬇ Export performance log (CSV)</button>' +
     '<button data-action="export-toc" class="tap w-full mb-2 border border-stone-300 rounded-xl text-[13px] font-semibold">⬇ Export all TOC scripts (TXT)</button>' +
     '<button data-action="sample-csv" class="tap w-full mb-2 border border-stone-300 rounded-xl text-[13px] font-semibold">⬇ Download sample import CSV</button>' +
-    '<button disabled class="tap w-full mb-2 border border-stone-200 rounded-xl text-[12px] font-semibold text-stone-400 bg-stone-50 leading-snug px-2">Auto-sync from TikTok — coming soon<br><span class="font-normal">(needs TikTok Developer app approval)</span></button>' +
     '<button data-action="reset-logs" class="tap w-full mb-2 border border-amber-300 text-amber-800 rounded-xl text-[13px] font-semibold">Reset performance log only</button>' +
     '<button data-action="clear-all" class="tap w-full border border-red-300 text-red-700 rounded-xl text-[13px] font-semibold">Clear ALL data</button></div>';
 
@@ -1768,7 +1666,9 @@ function manualLogForm(prefill) {
       fld('Likes', '<input name="likes" inputmode="numeric" value="' + (prefill.likes != null ? prefill.likes : '') + '" class="w-full tap px-3 rounded-xl border border-stone-300">') +
       fld('Comments', '<input name="comments" inputmode="numeric" value="' + (prefill.comments != null ? prefill.comments : '') + '" class="w-full tap px-3 rounded-xl border border-stone-300">') +
       fld('Shares', '<input name="shares" inputmode="numeric" value="' + (prefill.shares != null ? prefill.shares : '') + '" class="w-full tap px-3 rounded-xl border border-stone-300">') + '</div>' +
-    fld('Orders (optional)', '<input name="orders" inputmode="numeric" value="' + (prefill.orders != null ? prefill.orders : '') + '" class="w-full tap px-3 rounded-xl border border-stone-300">') +
+    '<div class="grid grid-cols-2 gap-3">' +
+      fld('Orders (optional)', '<input name="orders" inputmode="numeric" value="' + (prefill.orders != null ? prefill.orders : '') + '" class="w-full tap px-3 rounded-xl border border-stone-300">') +
+      fld('GMV RM (optional)', '<input name="gmv" inputmode="decimal" value="' + (prefill.gmv != null ? prefill.gmv : '') + '" class="w-full tap px-3 rounded-xl border border-stone-300">') + '</div>' +
     '<div class="flex gap-2">' + (prefill.csv ? '<button type="button" data-action="skip-csv-row" class="tap flex-1 border border-stone-300 rounded-xl font-semibold text-[14px]">Skip</button>' : '') +
       '<button type="submit" class="tap flex-1 bg-stone-900 text-white rounded-xl font-semibold text-[14px]">Save</button></div></form>');
   $('#lform').addEventListener('submit', (e) => {
@@ -1786,7 +1686,7 @@ function manualLogForm(prefill) {
       date: String(f.get('date') || ymd(new Date())),
       views: num(f.get('views')) || 0, likes: num(f.get('likes')) || 0,
       comments: num(f.get('comments')) || 0, shares: num(f.get('shares')) || 0,
-      orders: num(f.get('orders')) || 0, source: prefill.csv ? 'csv' : 'manual'
+      orders: num(f.get('orders')) || 0, gmv: num(f.get('gmv')) || 0, source: prefill.csv ? 'csv' : 'manual'
     });
     saveAll(); closeModal();
     if (prefill.csv) csvQueueNext(); else { render(); toast('Logged ✓'); }
@@ -1835,7 +1735,7 @@ function handleCSV(text) {
     const row = rows[r], get = (k) => (idx[k] >= 0 ? row[idx[k]] : null);
     const rec = { tiktokId: String(get('videoId') || '').trim(),
       views: num(get('views')) || 0, likes: num(get('likes')) || 0, comments: num(get('comments')) || 0,
-      shares: num(get('shares')) || 0, orders: num(get('orders')) || 0,
+      shares: num(get('shares')) || 0, orders: num(get('orders')) || 0, gmv: num(get('gmv')) || 0,
       date: parseAnyDate(get('date')) || ymd(new Date()) };
     if (!rec.tiktokId && !rec.views) continue;
     parsed.push(rec);
@@ -1845,7 +1745,7 @@ function handleCSV(text) {
     const match = findByTiktokId(rec.tiktokId);
     const dupe = state.logs.find(l => l.tiktokId && l.tiktokId === rec.tiktokId && l.date === rec.date);
     if (dupe) {
-      Object.assign(dupe, { views: rec.views, likes: rec.likes, comments: rec.comments, shares: rec.shares, orders: rec.orders || dupe.orders });
+      Object.assign(dupe, { views: rec.views, likes: rec.likes, comments: rec.comments, shares: rec.shares, orders: rec.orders || dupe.orders, gmv: rec.gmv || dupe.gmv });
       csvImported++; return;
     }
     if (match) {
@@ -1853,7 +1753,7 @@ function handleCSV(text) {
       state.logs.push({ id: uid(), productId: match.p.id, videoId: match.v.id, tiktokId: rec.tiktokId,
         hook: (hist && hist.hook) || 'unknown', toc: (hist && hist.toc) || 'unknown',
         date: rec.date, views: rec.views, likes: rec.likes, comments: rec.comments,
-        shares: rec.shares, orders: rec.orders, source: 'csv' });
+        shares: rec.shares, orders: rec.orders, gmv: rec.gmv, source: 'csv' });
       csvImported++;
     } else csvQueue.push(rec);
   });
@@ -1882,13 +1782,13 @@ function download(filename, content, mime) {
 }
 function exportCSV() {
   if (!state.logs.length) { toast('Nothing to export yet', 'warn'); return; }
-  const head = ['date','product','clip','video_id','hook','toc_angle','views','likes','comments','shares','orders','like_rate_pct','engagement_rate_pct','days_since_posted','source'];
+  const head = ['date','product','clip','video_id','hook','toc_angle','views','likes','comments','shares','orders','gmv','like_rate_pct','engagement_rate_pct','days_since_posted','source'];
   const q = (s) => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
   const lines = [head.join(',')];
   state.logs.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).forEach(l => {
     const p = getProduct(l.productId), v = getVideo(l.productId, l.videoId), e = er(l), k = lr(l);
     lines.push([q(l.date), q(p ? p.name : ''), q(v ? v.label : ''), q(l.tiktokId || ''), q(hookLabel(l.hook)), q(l.toc ? hookLabel(l.toc) : ''),
-      l.views || 0, l.likes || 0, l.comments || 0, l.shares || 0, l.orders || 0,
+      l.views || 0, l.likes || 0, l.comments || 0, l.shares || 0, l.orders || 0, (l.gmv || 0).toFixed(2),
       k == null ? '' : k.toFixed(2), e == null ? '' : e.toFixed(2),
       daysSince(l.date) == null ? '' : daysSince(l.date), q(l.source || '')].join(','));
   });
@@ -1916,8 +1816,9 @@ function sampleCSV() {
   while (ids.length < 7) ids.push('73' + String(Math.floor(Math.random() * 1e15)).padStart(15, '0'));
   const d = (n) => ymd(new Date(Date.now() - n * DAY_MS));
   const views = [1219, 840, 465, 2130, 310, 96, 1580], likes = [88, 61, 30, 175, 19, 5, 121];
-  const rows = ['video_id,views,likes,comments,shares,create_date'];
-  for (let i = 0; i < 7; i++) rows.push(ids[i] + ',' + views[i] + ',' + likes[i] + ',' + (i + 2) + ',' + (i * 3 + 4) + ',' + d(7 - i));
+  const orders = [4, 2, 1, 7, 0, 0, 5], gmv = [212.50, 96.00, 45.00, 349.30, 0, 0, 260.00];
+  const rows = ['video_id,views,likes,comments,shares,orders,gmv,create_date'];
+  for (let i = 0; i < 7; i++) rows.push(ids[i] + ',' + views[i] + ',' + likes[i] + ',' + (i + 2) + ',' + (i * 3 + 4) + ',' + orders[i] + ',' + gmv[i] + ',' + d(7 - i));
   download('sample-tiktok-analytics.csv', rows.join('\n'));
   toast('Sample CSV downloaded');
 }
@@ -2084,9 +1985,6 @@ document.addEventListener('click', async (e) => {
       inp.click(); break;
     }
     case 'manual-log': manualLogForm({}); break;
-    case 'tt-sync': ttSync(); break;
-    case 'tt-logout': if (confirm('Disconnect TikTok? Your planning data stays on this device.')) ttLogout(); break;
-    case 'tt-upload': ttUpload(el.dataset.p, el.dataset.v); break;
     case 'skip-csv-row': csvImported = Math.max(0, csvImported - 1); closeModal(); csvQueueNext(); break;
     case 'sort': {
       const k = el.dataset.k;
@@ -2142,17 +2040,6 @@ function render() {
   await Promise.all(allVideos().filter(x => x.v.hasFile).map(x => getThumb(x.v.id)));
   currentWeekKey(); getPlan(currentWeekKey());
   render();
-
-  // Report back from the TikTok redirect, then tidy the URL so a refresh doesn't re-toast.
-  try {
-    const q = new URLSearchParams(location.search);
-    if (q.get('tt') === 'connected') { toast('TikTok connected ✓'); state.tab = 'perf'; switchTab('perf'); }
-    else if (q.get('tt') === 'error') toast('TikTok: ' + (q.get('reason') || 'connection failed'), 'err');
-    if (q.has('tt')) history.replaceState({}, '', location.pathname);
-  } catch (e) {}
-
-  // Only ask the server about the connection when there's a server to ask.
-  if (location.protocol.startsWith('http')) ttCheck(true);
 })();
 
 let deferredPrompt = null;
